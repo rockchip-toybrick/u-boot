@@ -213,6 +213,18 @@ void board_env_fixup(void)
 		env_set_hex("kernel_addr_r", kernel_addr_r);
 }
 
+int rockchip_iodomain_init(void)
+{
+	int ret;
+	struct udevice *dev;
+
+	ret = uclass_get_device(UCLASS_IO_DOMAIN, 0, &dev);
+	if (ret)
+		pr_err("Can't find UCLASS_IODOMAIN driver %d\n", ret);
+
+	return 0;
+}
+
 int board_init(void)
 {
 	int ret;
@@ -232,6 +244,8 @@ int board_init(void)
 	if (ret)
 		debug("%s: Cannot enable boot on regulator\n", __func__);
 #endif
+	rockchip_iodomain_init();
+
 	set_armclk_rate();
 
 #ifdef CONFIG_DM_DVFS
