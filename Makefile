@@ -672,8 +672,7 @@ libs-y += drivers/power/ \
 	drivers/power/pmic/ \
 	drivers/power/battery/ \
 	drivers/power/regulator/ \
-	drivers/power/dvfs/ \
-	drivers/power/io-domain/
+	drivers/power/dvfs/
 libs-y += drivers/spi/
 libs-$(CONFIG_FMAN_ENET) += drivers/net/fm/
 libs-$(CONFIG_SYS_FSL_DDR) += drivers/ddr/fsl/
