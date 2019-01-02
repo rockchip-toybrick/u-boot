@@ -614,6 +614,12 @@ config SKIP_RELOCATE_UBOOT
 	help
 	  This enable support for skipping U-Boot relocation.
 
+config DUAL_SYSTEM
+	bool "Support for dual system boot"
+	default n
+	help
+	  This enable support for dual system boot.
+
 menu "Security support"
 
 config HASH
