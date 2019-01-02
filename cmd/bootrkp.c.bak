@@ -10,7 +10,11 @@
 #include <attestation_key.h>
 #include <boot_rkimg.h>
 #include <optee_include/OpteeClientInterface.h>
+
+#define DOUBLE_SYSTEM
+#ifdef DOUBLE_SYSTEM
 #include <key.h>
+#endif
 
 #define OEM_UNLOCK_ARG_SIZE 30
 
@@ -23,15 +27,27 @@ static int do_boot_rockchip(cmd_tbl_t *cmdtp, int flag, int argc,
 	char *boot_partname = PART_BOOT;
 	int ret = 0;
 	int i = 0;
-#ifdef CONFIG_DUAL_SYSTEM
-	int state = 0;
 
+#ifdef DOUBLE_SYSTEM
+	int state = 0;
 	state = key_read(KEY_VOLUMEUP);
-	printf("Read Volup key state: %d\n", state);
+	printf("####++ Read key stat: %d\n", state);
+#if 1
 	if (state != KEY_PRESS_DOWN && state != KEY_PRESS_LONG_DOWN) {
-		printf("No Volup key pressed... Don't bootrkp.\n");
+		printf("#### no volup key pressed... dont bootrkp.\n");
 		return CMD_RET_FAILURE;
 	}
+#else
+	if (state < 0) {
+		printf("#### read  key failed: %d\n", state);
+	} else if (state == KEY_PRESS_DOWN) {
+		printf("#### volup key pressed...\n");
+		return CMD_RET_FAILURE;
+	} else if (state == KEY_PRESS_LONG_DOWN) {
+		printf("#### volup key long pressed...\n");
+		return CMD_RET_FAILURE;
+	}
+#endif
 #endif
 
 	dev_desc = rockchip_get_bootdev();

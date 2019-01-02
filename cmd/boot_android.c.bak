@@ -16,7 +16,11 @@
 #include <android_bootloader_message.h>
 #include <android_avb/rk_avb_ops_user.h>
 #include <android_avb/avb_atx_ops.h>
+
+#define DOUBLE_SYSTEM
+#ifdef DOUBLE_SYSTEM
 #include <key.h>
+#endif
 
 static int do_boot_android(cmd_tbl_t *cmdtp, int flag, int argc,
 			   char * const argv[])
@@ -25,7 +29,7 @@ static int do_boot_android(cmd_tbl_t *cmdtp, int flag, int argc,
 	int ret = CMD_RET_SUCCESS;
 	char *addr_arg_endp, *addr_str;
 	struct blk_desc *dev_desc;
-#ifdef CONFIG_DUAL_SYSTEM
+#ifdef DOUBLE_SYSTEM
 	int state;
 #endif
 
@@ -46,13 +50,25 @@ static int do_boot_android(cmd_tbl_t *cmdtp, int flag, int argc,
 			load_address = CONFIG_SYS_LOAD_ADDR;
 	}
 
-#ifdef CONFIG_DUAL_SYSTEM
+#ifdef DOUBLE_SYSTEM
 	state = key_read(KEY_VOLUMEUP);
-	printf("Read Volup key state: %d\n", state);
+	printf("####++ Read key stat: %d\n", state);
+#if 1
 	if (state != KEY_PRESS_DOWN && state != KEY_PRESS_LONG_DOWN) {
-		printf("No Volup key pressed... Don't boot android.\n");
+		printf("#### no volup key pressed... dont boot android.\n");
 		return CMD_RET_FAILURE;
 	}
+#else
+	if (state < 0) {
+		printf("#### read  key failed: %d\n", state);
+	} else if (state == KEY_PRESS_DOWN) {
+		printf("#### key pressed...\n");
+		return CMD_RET_FAILURE;
+	} else if (state == KEY_PRESS_LONG_DOWN) {
+		printf("#### key long pressed...\n");
+		return CMD_RET_FAILURE;
+	}
+#endif
 #endif
 
 #if defined(CONFIG_ARM64)
