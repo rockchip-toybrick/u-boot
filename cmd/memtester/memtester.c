@@ -20,6 +20,7 @@
 #include "sizes.h"
 #include "types.h"
 #include "tests.h"
+#include "io_map.h"
 
 #define EXIT_FAIL_NONSTARTER    0x01
 #define EXIT_FAIL_ADDRESSLINES  0x02
@@ -62,7 +63,7 @@ static int do_memtester(cmd_tbl_t *cmdtp, int flag, int argc,
 	ul loop, i, j;
 	ul buf_start;
 	ul start_adr[2], length[2];
-	ulv * bufa[2], *bufb[2];
+	u32v * bufa[2], *bufb[2];
 	ul count[2];
 	ul bufsize = 0;
 	ul loops = 0;
@@ -117,14 +118,14 @@ static int do_memtester(cmd_tbl_t *cmdtp, int flag, int argc,
 	if (!bufsize) {
 		/* test all memory */
 		for (i = 0; i < 2; i++) {
-			bufa[i] = (ulv *)start_adr[i];
-			bufb[i] = (ulv *)(start_adr[i] + length[i] / 2);
-			count[i] = length[i] / 2 / sizeof(ul);
+			bufa[i] = (u32v *)start_adr[i];
+			bufb[i] = (u32v *)(start_adr[i] + length[i] / 2);
+			count[i] = length[i] / 2 / sizeof(u32);
 		}
 	} else {
-		bufa[0] = (ulv *)buf_start;
-		bufb[0] = (ulv *)(buf_start + bufsize / 2);
-		count[0] = bufsize / 2 / sizeof(ul);
+		bufa[0] = (u32v *)buf_start;
+		bufb[0] = (u32v *)(buf_start + bufsize / 2);
+		count[0] = bufsize / 2 / sizeof(u32);
 		bufa[1] = 0;
 		if (start_adr[1]) {
 			if (buf_start < start_adr[0] ||
@@ -148,12 +149,14 @@ static int do_memtester(cmd_tbl_t *cmdtp, int flag, int argc,
 		}
 	}
 
+	data_cpu_2_io_init();
+
 	for (loop = 1; ((!loops) || loop <= loops); loop++) {
 		for (j = 0; j < 2; j++) {
 			if (!bufa[j])
 				continue;
 			printf("testing:0x%lx - 0x%lx\n", (ul)bufa[j],
-			       (ul)bufa[j] + count[j] * 2 * sizeof(ul));
+			       (ul)bufa[j] + count[j] * 2 * sizeof(u32));
 			printf("Loop %lu", loop);
 			if (loops)
 				printf("/%lu", loops);

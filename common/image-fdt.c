@@ -14,13 +14,16 @@
 #include <fdt_support.h>
 #include <errno.h>
 #include <image.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <mapmem.h>
 #include <asm/io.h>
 
 #ifndef CONFIG_SYS_FDT_PAD
 #define CONFIG_SYS_FDT_PAD 0x3000
 #endif
+
+/* adding a ramdisk needs 0x44 bytes in version 2008.10 */
+#define FDT_RAMDISK_OVERHEAD	0x80
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -478,6 +481,11 @@ error:
 __weak int ft_verify_fdt(void *fdt)
 {
 	return 1;
+}
+
+__weak int arch_fixup_fdt(void *blob)
+{
+	return 0;
 }
 
 int image_setup_libfdt(bootm_headers_t *images, void *blob,
