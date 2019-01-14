@@ -27,6 +27,8 @@ static int do_boot_android(cmd_tbl_t *cmdtp, int flag, int argc,
 	struct blk_desc *dev_desc;
 #ifdef CONFIG_DUAL_SYSTEM
 	int state;
+	int part_num;
+	disk_partition_t linux_part_info;
 #endif
 
 	if (argc < 3)
@@ -46,15 +48,6 @@ static int do_boot_android(cmd_tbl_t *cmdtp, int flag, int argc,
 			load_address = CONFIG_SYS_LOAD_ADDR;
 	}
 
-#ifdef CONFIG_DUAL_SYSTEM
-	state = key_read(KEY_VOLUMEUP);
-	printf("Read Volup key state: %d\n", state);
-	if (state != KEY_PRESS_DOWN && state != KEY_PRESS_LONG_DOWN) {
-		printf("No Volup key pressed... Don't boot android.\n");
-		return CMD_RET_FAILURE;
-	}
-#endif
-
 #if defined(CONFIG_ARM64)
 	/* ARM64 kernel load addr need to align to 0x80000, and android boot.img
 	 * have a 2KB header, need to reserve space for it.
@@ -67,6 +60,18 @@ static int do_boot_android(cmd_tbl_t *cmdtp, int flag, int argc,
 		printf("Could not get %s %s\n", argv[1], argv[2]);
 		return CMD_RET_FAILURE;
 	}
+
+#ifdef CONFIG_DUAL_SYSTEM
+	part_num = part_get_info_by_name(dev_desc, "rootfs", &linux_part_info);
+        if (part_num >= 0) {
+		state = key_read(KEY_VOLUMEUP);
+		printf("Read Volup key state: %d %d\n", state, part_num);
+		if (state != KEY_PRESS_DOWN && state != KEY_PRESS_LONG_DOWN) {
+			printf("No Volup key pressed... Don't boot android.\n");
+			return CMD_RET_FAILURE;
+		}
+	}
+#endif
 
 	ret = android_bootloader_boot_flow(dev_desc, load_address);
 	if (ret < 0) {
