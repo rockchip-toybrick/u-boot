@@ -8,7 +8,7 @@
 #include <adc.h>
 #include <asm/io.h>
 #include <asm/arch/boot_mode.h>
-#include <asm/arch/rk_atags.h>
+#include <asm/arch/param.h>
 #include <cli.h>
 #include <dm.h>
 #include <fdtdec.h>
@@ -19,6 +19,7 @@
 #include <ramdisk.h>
 #endif
 #include <mmc.h>
+#include <console.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -98,77 +99,29 @@ void boot_devtype_init(void)
 	if (done)
 		return;
 
-	/*
-	 * New way: get bootdev from preloader atags info.
-	 */
-#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
-	struct tag *t;
-
-	t = atags_get_tag(ATAG_BOOTDEV);
-	if (t) {
+	ret = param_parse_bootdev(&devtype, &devnum);
+	if (!ret) {
 		atags_en = 1;
-		switch (t->u.bootdev.devtype) {
-		case BOOT_TYPE_EMMC:
-			devtype = "mmc";
-			devnum = "0";
-			break;
-		case BOOT_TYPE_SD0:
-		case BOOT_TYPE_SD1:
-			devtype = "mmc";
-			devnum = "1";
-			break;
-		case BOOT_TYPE_NAND:
-			devtype = "rknand";
-			devnum = "0";
-			break;
-		case BOOT_TYPE_SPI_NAND:
-			devtype = "spinand";
-			devnum = "0";
-			break;
-		case BOOT_TYPE_SPI_NOR:
-			devtype = "spinor";
-			devnum = "1";
-			break;
-		case BOOT_TYPE_RAM:
-			devtype = "ramdisk";
-			devnum = "0";
-			break;
-		default:
-			printf("Unknown bootdev type: 0x%x\n",
-			       t->u.bootdev.devtype);
-			goto fallback;
-		}
-	}
-
-	debug("%s: Get bootdev from atags: %s %s\n", __func__, devtype, devnum);
-
-	if (devtype && devnum) {
 		env_set("devtype", devtype);
 		env_set("devnum", devnum);
 #ifdef CONFIG_DM_MMC
 		if (!strcmp("mmc", devtype))
 			mmc_initialize(gd->bd);
 #endif
-		goto finish;
-	}
-#endif
-
-	/*
-	 * Legacy way: get bootdev by going through all boot media.
-	 */
-fallback:
+	} else {
 #ifdef CONFIG_DM_MMC
-	mmc_initialize(gd->bd);
+		mmc_initialize(gd->bd);
 #endif
-	ret = run_command_list(devtype_num_set, -1, 0);
-	if (ret) {
-		/* Set default dev type/num if command not valid */
-		devtype = "mmc";
-		devnum = "0";
-		env_set("devtype", devtype);
-		env_set("devnum", devnum);
+		ret = run_command_list(devtype_num_set, -1, 0);
+		if (ret) {
+			/* Set default dev type/num if command not valid */
+			devtype = "mmc";
+			devnum = "0";
+			env_set("devtype", devtype);
+			env_set("devnum", devnum);
+		}
 	}
-finish:
+
 	done = 1;
 	printf("Bootdev%s: %s %s\n", atags_en ? "(atags)" : "",
 	       env_get("devtype"), env_get("devnum"));
@@ -176,7 +129,9 @@ finish:
 
 void rockchip_dnl_mode_check(void)
 {
-	if (rockchip_dnl_key_pressed()) {
+	/* recovery key or "ctrl+d" */
+	if (rockchip_dnl_key_pressed() ||
+	    gd->console_evt == CONSOLE_EVT_CTRL_D) {
 		printf("download key pressed... ");
 		if (rockchip_u2phy_vbus_detect() > 0) {
 			printf("entering download mode...\n");

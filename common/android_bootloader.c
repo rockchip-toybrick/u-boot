@@ -19,14 +19,17 @@
 #include <fs.h>
 #include <boot_rkimg.h>
 #include <attestation_key.h>
-#include <optee_include/OpteeClientInterface.h>
+#include <keymaster.h>
 #include <linux/libfdt_env.h>
+#include <optee_include/OpteeClientInterface.h>
+#include <sysmem.h>
 
 #define ANDROID_PARTITION_BOOT "boot"
 #define ANDROID_PARTITION_MISC "misc"
 #define ANDROID_PARTITION_OEM  "oem"
 #define ANDROID_PARTITION_RECOVERY  "recovery"
 #define ANDROID_PARTITION_SYSTEM "system"
+#define ANDROID_PARTITION_VBMETA "vbmeta"
 
 #define ANDROID_ARG_SLOT_SUFFIX "androidboot.slot_suffix="
 #define ANDROID_ARG_ROOT "root="
@@ -328,6 +331,8 @@ int android_bootloader_boot_kernel(unsigned long kernel_address)
 	else
 		printf("Booting kernel at %s with fdt at %s...\n\n\n",
 		       kernel_addr_r, fdt_addr);
+
+	sysmem_dump_check();
 
 	do_bootm(NULL, 0, 4, bootm_args);
 
@@ -800,7 +805,17 @@ int android_fdt_overlay_apply(void *fdt_addr)
 
 	ret = android_get_dtbo(&fdt_dtbo, (void *)hdr, &index);
 	if (!ret) {
+		phys_size_t fdt_size;
 		/* Must incease size before overlay */
+		fdt_size = fdt_totalsize((void *)fdt_addr) +
+				fdt_totalsize((void *)fdt_dtbo);
+		if (sysmem_free((phys_addr_t)fdt_addr))
+			goto out;
+
+		if (!sysmem_alloc_base("fdt(dtbo)",
+				       (phys_addr_t)fdt_addr,
+					fdt_size + CONFIG_SYS_FDT_PAD))
+			goto out;
 		fdt_increase_size(fdt_addr, fdt_totalsize((void *)fdt_dtbo));
 		ret = fdt_overlay_apply(fdt_addr, (void *)fdt_dtbo);
 		if (!ret) {
@@ -818,6 +833,47 @@ out:
 	return 0;
 }
 #endif
+
+static int load_android_image(struct blk_desc *dev_desc,
+			      char *boot_partname,
+			      char *slot_suffix,
+			      unsigned long *load_address)
+{
+	disk_partition_t boot_part;
+	int ret, part_num;
+
+	part_num = android_part_get_info_by_name_suffix(dev_desc,
+							boot_partname,
+							slot_suffix,
+							&boot_part);
+	if (part_num < 0) {
+		printf("%s: Can't find part: %s\n", __func__, boot_partname);
+		return -1;
+	}
+	debug("ANDROID: Loading kernel from \"%s\", partition %d.\n",
+	      boot_part.name, part_num);
+
+	ret = android_image_load(dev_desc, &boot_part, *load_address, -1UL);
+	if (ret < 0) {
+		debug("%s: %s part load fail, ret=%d\n",
+		      __func__, boot_part.name, ret);
+		return ret;
+	}
+	*load_address = ret;
+
+	return 0;
+}
+
+static bool avb_enabled;
+void android_avb_set_enabled(bool enable)
+{
+	avb_enabled = enable;
+}
+
+bool android_avb_is_enabled(void)
+{
+	return avb_enabled;
+}
 
 int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 				 unsigned long load_address)
@@ -838,10 +894,12 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	 */
 	part_num = part_get_info_by_name(dev_desc, ANDROID_PARTITION_MISC,
 					 &misc_part_info);
-	if (part_num < 0)
+	if (part_num < 0) {
 		printf("%s Could not find misc partition\n", __func__);
+		return -ENODEV;
+	}
 
-#ifdef CONFIG_OPTEE_CLIENT
+#ifdef CONFIG_ANDROID_KEYMASTER_CA
 	/* load attestation key from misc partition. */
 	load_attestation_key(dev_desc, &misc_part_info);
 #endif
@@ -905,33 +963,48 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	}
 
 #ifdef CONFIG_ANDROID_AVB
-	if (android_slot_verify(boot_partname, &load_address, slot_suffix))
+	uint8_t vboot_flag = 0;
+	char vbmeta_partition[9] = {0};
+	disk_partition_t vbmeta_part_info;
+
+	if (trusty_read_vbootkey_enable_flag(&vboot_flag))
 		return -1;
+
+	if (vboot_flag) {
+		printf("SecureBoot enabled, AVB verify\n");
+		android_avb_set_enabled(true);
+		if (android_slot_verify(boot_partname, &load_address,
+					slot_suffix))
+			return -1;
+	} else {
+		strcat(vbmeta_partition, ANDROID_PARTITION_VBMETA);
+		strcat(vbmeta_partition, slot_suffix);
+		part_num = part_get_info_by_name(dev_desc, vbmeta_partition,
+						 &vbmeta_part_info);
+		if (part_num < 0) {
+			printf("SecureBoot disabled, AVB skip\n");
+			env_update("bootargs",
+				   "androidboot.verifiedbootstate=orange");
+			android_avb_set_enabled(false);
+			if (load_android_image(dev_desc, boot_partname,
+					       slot_suffix, &load_address))
+				return -1;
+		} else {
+			printf("SecureBoot enabled, AVB verify\n");
+			android_avb_set_enabled(true);
+			if (android_slot_verify(boot_partname, &load_address,
+						slot_suffix))
+				return -1;
+		}
+	}
 #else
 	/*
 	 * 2. Load the boot/recovery from the desired "boot" partition.
 	 * Determine if this is an AOSP image.
 	 */
-	disk_partition_t boot_part_info;
-	part_num =
-	    android_part_get_info_by_name_suffix(dev_desc,
-						 boot_partname,
-						 slot_suffix, &boot_part_info);
-	if (part_num < 0) {
-		printf("%s Could not found bootable partition %s\n", __func__,
-		       boot_partname);
+	if (load_android_image(dev_desc, boot_partname,
+			       slot_suffix, &load_address))
 		return -1;
-	}
-	debug("ANDROID: Loading kernel from \"%s\", partition %d.\n",
-	      boot_part_info.name, part_num);
-
-	ret = android_image_load(dev_desc, &boot_part_info, load_address,
-				 -1UL);
-	if (ret < 0) {
-		printf("%s %s part load fail\n", __func__, boot_part_info.name);
-		return ret;
-	}
-	load_address = ret;
 #endif
 
 	/* Set Android root variables. */

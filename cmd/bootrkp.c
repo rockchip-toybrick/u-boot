@@ -9,8 +9,7 @@
 #include <android_bootloader.h>
 #include <attestation_key.h>
 #include <boot_rkimg.h>
-#include <optee_include/OpteeClientInterface.h>
-#include <key.h>
+#include <keymaster.h>
 
 #define OEM_UNLOCK_ARG_SIZE 30
 
@@ -23,11 +22,6 @@ static int do_boot_rockchip(cmd_tbl_t *cmdtp, int flag, int argc,
 	char *boot_partname = PART_BOOT;
 	int ret = 0;
 	int i = 0;
-#ifdef CONFIG_DUAL_SYSTEM
-	int state = 0;
-	int part_num;
-	disk_partition_t linux_part_info;
-#endif
 
 	dev_desc = rockchip_get_bootdev();
 	if (!dev_desc) {
@@ -35,19 +29,7 @@ static int do_boot_rockchip(cmd_tbl_t *cmdtp, int flag, int argc,
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_DUAL_SYSTEM
-	part_num = part_get_info_by_name(dev_desc, "rootfs", &linux_part_info);
-	if (part_num >= 0) {
-		state = key_read(KEY_VOLUMEUP);
-		printf("Read Volup key state: %d %d\n", state, part_num);
-		if (state != KEY_PRESS_DOWN && state != KEY_PRESS_LONG_DOWN) {
-			printf("No Volup key pressed... Don't bootrkp.\n");
-			return CMD_RET_FAILURE;
-		}
-	}
-#endif
-
-#ifdef CONFIG_OPTEE_CLIENT
+#ifdef CONFIG_ANDROID_KEYMASTER_CA
 	disk_partition_t misc_part_info;
 
 	/* load attestation key from misc partition. */

@@ -9,6 +9,7 @@
 #include <debug_uart.h>
 #include <ram.h>
 #include <syscon.h>
+#include <sysmem.h>
 #include <asm/io.h>
 #include <asm/arch/vendor.h>
 #include <misc.h>
@@ -17,6 +18,7 @@
 #include <asm/arch/periph.h>
 #include <asm/arch/boot_mode.h>
 #include <asm/arch/rk_atags.h>
+#include <asm/arch/param.h>
 #ifdef CONFIG_DM_CHARGE_DISPLAY
 #include <power/charge_display.h>
 #endif
@@ -37,6 +39,7 @@
 #endif
 #include <of_live.h>
 #include <dm/root.h>
+#include <console.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 /* define serialno max length, the max length is 512 Bytes
@@ -112,27 +115,6 @@ int fb_set_reboot_flag(void)
 }
 #endif
 
-#ifdef CONFIG_DM_CHARGE_DISPLAY
-static int charge_display(void)
-{
-	int ret;
-	struct udevice *dev;
-
-	ret = uclass_get_device(UCLASS_CHARGE_DISPLAY, 0, &dev);
-	if (ret) {
-		if (ret != -ENODEV) {
-			debug("Get UCLASS CHARGE DISPLAY failed: %d\n", ret);
-			return ret;
-		} else {
-			debug("Can't find charge display driver\n");
-		}
-		return 0;
-	}
-
-	return charge_display_show(dev);
-}
-#endif
-
 __weak int rk_board_init(void)
 {
 	return 0;
@@ -199,6 +181,11 @@ int init_kernel_dtb(void)
 
 	gd->fdt_blob = (void *)fdt_addr;
 
+	/* Reserve 'reserved-memory' */
+	ret = boot_fdt_add_sysmem_rsv_regions((void *)gd->fdt_blob);
+	if (ret)
+		return ret;
+
 	return 0;
 }
 #endif
@@ -216,11 +203,30 @@ void board_env_fixup(void)
 		env_set_hex("kernel_addr_r", kernel_addr_r);
 }
 
+static void early_bootrom_download(void)
+{
+	if (!tstc())
+		return;
+
+	gd->console_evt = getc();
+#if (CONFIG_ROCKCHIP_BOOT_MODE_REG > 0)
+	/* ctrl+b */
+	if (gd->console_evt == CONSOLE_EVT_CTRL_B) {
+		printf("Enter bootrom download...");
+		mdelay(100);
+		writel(BOOT_BROM_DOWNLOAD, CONFIG_ROCKCHIP_BOOT_MODE_REG);
+		do_reset(NULL, 0, 0, NULL);
+		printf("failed!\n");
+	}
+#endif
+}
+
 int board_init(void)
 {
 	int ret;
 
 	board_debug_uart_init();
+	early_bootrom_download();
 
 #ifdef CONFIG_USING_KERNEL_DTB
 	init_kernel_dtb();
@@ -282,8 +288,10 @@ int board_fdt_fixup(void *blob)
 
 void board_quiesce_devices(void)
 {
+#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	/* Destroy atags makes next warm boot safer */
 	atags_destroy();
+#endif
 }
 
 void enable_caches(void)
@@ -341,7 +349,36 @@ void board_lmb_reserve(struct lmb *lmb)
 }
 #endif
 
-#ifdef CONFIG_ROCKCHIP_PRELOADER_SERIAL
+#ifdef CONFIG_SYSMEM
+int board_sysmem_reserve(struct sysmem *sysmem)
+{
+	struct sysmem_property prop;
+	int ret;
+
+	/* ATF */
+	prop = param_parse_atf_mem();
+	ret = sysmem_reserve(prop.name, prop.base, prop.size);
+	if (ret)
+		return ret;
+
+	/* PSTORE/ATAGS/SHM */
+	prop = param_parse_common_resv_mem();
+	ret = sysmem_reserve(prop.name, prop.base, prop.size);
+	if (ret)
+		return ret;
+
+	/* OP-TEE */
+	prop = param_parse_optee_mem();
+	ret = sysmem_reserve(prop.name, prop.base, prop.size);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+#endif
+
+#if defined(CONFIG_ROCKCHIP_PRELOADER_SERIAL) && \
+    defined(CONFIG_ROCKCHIP_PRELOADER_ATAGS)
 int board_init_f_init_serial(void)
 {
 	struct tag *t = atags_get_tag(ATAG_SERIAL);
@@ -376,28 +413,33 @@ static struct dwc2_plat_otg_data otg_data = {
 int board_usb_init(int index, enum usb_init_type init)
 {
 	int node;
-	const char *mode;
 	fdt_addr_t addr;
 	const fdt32_t *reg;
-	bool matched = false;
 	const void *blob = gd->fdt_blob;
 
 	/* find the usb_otg node */
-	node = fdt_node_offset_by_compatible(blob, -1,
-					"snps,dwc2");
+	node = fdt_node_offset_by_compatible(blob, -1, "snps,dwc2");
 
-	while (node > 0) {
-		mode = fdt_getprop(blob, node, "dr_mode", NULL);
-		if (mode && strcmp(mode, "otg") == 0) {
-			matched = true;
-			break;
+retry:
+	if (node > 0) {
+		reg = fdt_getprop(blob, node, "reg", NULL);
+		if (!reg)
+			return -EINVAL;
+
+		addr = fdt_translate_address(blob, node, reg);
+		if (addr == OF_BAD_ADDR) {
+			pr_err("Not found usb_otg address\n");
+			return -EINVAL;
 		}
 
-		node = fdt_node_offset_by_compatible(blob, node,
-					"snps,dwc2");
-	}
-
-	if (!matched) {
+#if defined(CONFIG_ROCKCHIP_RK3288)
+		if (addr != 0xff580000) {
+			node = fdt_node_offset_by_compatible(blob, node,
+							     "snps,dwc2");
+			goto retry;
+		}
+#endif
+	} else {
 		/*
 		 * With kernel dtb support, rk3288 dwc2 otg node
 		 * use the rockchip legacy dwc2 driver "dwc_otg_310"
@@ -412,23 +454,12 @@ int board_usb_init(int index, enum usb_init_type init)
 		node = fdt_node_offset_by_compatible(blob, -1,
 				"rockchip,rk3368-usb");
 #endif
-
 		if (node > 0) {
-			matched = true;
+			goto retry;
 		} else {
 			pr_err("Not found usb_otg device\n");
 			return -ENODEV;
 		}
-	}
-
-	reg = fdt_getprop(blob, node, "reg", NULL);
-	if (!reg)
-		return -EINVAL;
-
-	addr = fdt_translate_address(blob, node, reg);
-	if (addr == OF_BAD_ADDR) {
-		pr_err("Not found usb_otg address\n");
-		return -EINVAL;
 	}
 
 	otg_data.regs_otg = (uintptr_t)addr;

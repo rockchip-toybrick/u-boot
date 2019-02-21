@@ -791,10 +791,13 @@ static ulong px30_vop_set_clk(struct px30_clk_priv *priv, ulong clk_id, uint hz)
 			     (src_clk_div - 1) << ACLK_VO_DIV_SHIFT);
 		break;
 	case DCLK_VOPB:
-		if (hz < PX30_VOP_PLL_LIMIT)
+		if (hz < PX30_VOP_PLL_LIMIT) {
 			src_clk_div = DIV_ROUND_UP(PX30_VOP_PLL_LIMIT, hz);
-		else
+			if (src_clk_div % 2)
+				src_clk_div = src_clk_div - 1;
+		} else {
 			src_clk_div = 1;
+		}
 		assert(src_clk_div - 1 <= 255);
 		rkclk_set_pll(&cru->pll[CPLL], &cru->mode, CPLL, hz * src_clk_div);
 		rk_clrsetreg(&cru->clksel_con[5],
@@ -810,10 +813,13 @@ static ulong px30_vop_set_clk(struct px30_clk_priv *priv, ulong clk_id, uint hz)
 			src_clk_div = npll_hz / hz;
 			assert(src_clk_div - 1 <= 255);
 		} else {
-			if (hz < PX30_VOP_PLL_LIMIT)
+			if (hz < PX30_VOP_PLL_LIMIT) {
 				src_clk_div = DIV_ROUND_UP(PX30_VOP_PLL_LIMIT, hz);
-			else
+				if (src_clk_div % 2)
+					src_clk_div = src_clk_div - 1;
+			} else {
 				src_clk_div = 1;
+			}
 			assert(src_clk_div - 1 <= 255);
 			rkclk_set_pll(&cru->pll[NPLL], &cru->mode, NPLL, hz * src_clk_div);
 		}
@@ -1430,16 +1436,24 @@ static int px30_clk_probe(struct udevice *dev)
 	struct px30_clk_priv *priv = dev_get_priv(dev);
 	int ret;
 
+	priv->sync_kernel = false;
+	if (!priv->armclk_enter_hz) {
+		priv->armclk_enter_hz = px30_clk_get_pll_rate(priv, APLL);
+		priv->armclk_init_hz = priv->armclk_enter_hz;
+	}
 	if (px30_clk_get_pll_rate(priv, APLL) != APLL_HZ) {
 		ret = px30_armclk_set_clk(priv, APLL_HZ);
 		if (ret < 0)
 			printf("%s failed to set armclk rate\n", __func__);
+		priv->armclk_init_hz = APLL_HZ;
 	}
 
 	/* Process 'assigned-{clocks/clock-parents/clock-rates}' properties */
 	ret = clk_set_defaults(dev);
 	if (ret)
 		debug("%s clk_set_defaults failed %d\n", __func__, ret);
+	else
+		priv->sync_kernel = true;
 
 	if (!priv->gpll_hz) {
 		ret = px30_clk_get_gpll_rate(&priv->gpll_hz);
@@ -1753,6 +1767,7 @@ U_BOOT_DRIVER(rockchip_px30_pmucru) = {
 int soc_clk_dump(void)
 {
 	struct udevice *cru_dev, *pmucru_dev;
+	struct px30_clk_priv *priv;
 	const struct px30_clk_info *clk_dump;
 	struct clk clk;
 	unsigned long clk_count = ARRAY_SIZE(clks_dump);
@@ -1775,7 +1790,13 @@ int soc_clk_dump(void)
 		return ret;
 	}
 
-	printf("CLK:\n");
+	priv = dev_get_priv(cru_dev);
+	printf("CLK: (%s. arm: enter %lu KHz, init %lu KHz, kernel %lu%s)\n",
+	       priv->sync_kernel ? "sync kernel" : "uboot",
+	       priv->armclk_enter_hz / 1000,
+	       priv->armclk_init_hz / 1000,
+	       priv->set_armclk_rate ? priv->armclk_hz / 1000 : 0,
+	       priv->set_armclk_rate ? " KHz" : "N/A");
 	for (i = 0; i < clk_count; i++) {
 		clk_dump = &clks_dump[i];
 		if (clk_dump->name) {
@@ -1791,17 +1812,17 @@ int soc_clk_dump(void)
 			clk_free(&clk);
 			if (i == 0) {
 				if (rate < 0)
-					printf("%s %s\n", clk_dump->name,
+					printf("  %s %s\n", clk_dump->name,
 					       "unknown");
 				else
-					printf("%s %lu KHz\n", clk_dump->name,
+					printf("  %s %lu KHz\n", clk_dump->name,
 					       rate / 1000);
 			} else {
 				if (rate < 0)
-					printf("%s %s\n", clk_dump->name,
+					printf("  %s %s\n", clk_dump->name,
 					       "unknown");
 				else
-					printf("%s %lu KHz\n", clk_dump->name,
+					printf("  %s %lu KHz\n", clk_dump->name,
 					       rate / 1000);
 			}
 		}

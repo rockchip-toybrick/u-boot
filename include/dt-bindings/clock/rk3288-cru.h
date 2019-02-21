@@ -75,6 +75,7 @@
 #define SCLK_USBPHY480M_SRC	122
 #define SCLK_PVTM_CORE		123
 #define SCLK_PVTM_GPU		124
+#define SCLK_CRYPTO		125
 #define SCLK_MIPIDSI_24M	126
 
 #define SCLK_MAC_PLL		150
@@ -104,6 +105,8 @@
 #define ACLK_VCODEC		208
 #define ACLK_CPU		209
 #define ACLK_PERI		210
+#define ACLK_VIO0		211
+#define ACLK_VIO1		212
 
 /* pclk gates */
 #define PCLK_GPIO0		320

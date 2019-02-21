@@ -7,6 +7,7 @@
 #include <adc.h>
 #include <asm/io.h>
 #include <malloc.h>
+#include <sysmem.h>
 #include <linux/list.h>
 #include <asm/arch/resource_img.h>
 #include <boot_rkimg.h>
@@ -176,6 +177,9 @@ static int init_resource_list(struct resource_img_hdr *hdr)
 #endif
 
 	if (hdr) {
+		if (resource_image_check_header(hdr))
+			return -EEXIST;
+
 		content = (void *)((char *)hdr
 				   + (hdr->c_offset) * RK_BLK_SIZE);
 		for (e_num = 0; e_num < hdr->e_nums; e_num++) {
@@ -326,13 +330,26 @@ static struct resource_file *get_file_info(struct resource_img_hdr *hdr,
 	return NULL;
 }
 
-int rockchip_get_resource_file(void *buf, const char *name)
+int rockchip_get_resource_file_offset(void *resc_hdr, const char *name)
 {
 	struct resource_file *file;
 
-	file = get_file_info(buf, name);
+	file = get_file_info(resc_hdr, name);
+	if (!file)
+		return -ENFILE;
 
 	return file->f_offset;
+}
+
+int rockchip_get_resource_file_size(void *resc_hdr, const char *name)
+{
+	struct resource_file *file;
+
+	file = get_file_info(resc_hdr, name);
+	if (!file)
+		return -ENFILE;
+
+	return file->f_size;
 }
 
 /*
@@ -602,7 +619,7 @@ int rockchip_read_dtb_file(void *fdt_addr)
 	struct resource_file *file;
 	struct list_head *node;
 	char *dtb_name = DTB_FILE;
-	int ret;
+	int ret, size;
 
 	if (list_empty(&entrys_head))
 		init_resource_list(NULL);
@@ -625,6 +642,14 @@ int rockchip_read_dtb_file(void *fdt_addr)
 	}
 
 	printf("DTB: %s\n", dtb_name);
+
+	size = rockchip_get_resource_file_size((void *)fdt_addr, dtb_name);
+	if (size < 0)
+		return size;
+
+	if (!sysmem_alloc_base("fdt", (phys_addr_t)fdt_addr,
+			       ALIGN(size, RK_BLK_SIZE) + CONFIG_SYS_FDT_PAD))
+		return -ENOMEM;
 
 	ret = rockchip_read_resource_file((void *)fdt_addr, dtb_name, 0, 0);
 	if (ret < 0)
