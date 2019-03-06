@@ -878,7 +878,7 @@ bool android_avb_is_enabled(void)
 int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 				 unsigned long load_address)
 {
-	enum android_boot_mode mode;
+	enum android_boot_mode mode = ANDROID_BOOT_MODE_NORMAL;
 	disk_partition_t misc_part_info;
 	int part_num;
 	int ret;
@@ -895,22 +895,23 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	part_num = part_get_info_by_name(dev_desc, ANDROID_PARTITION_MISC,
 					 &misc_part_info);
 	if (part_num < 0) {
-		printf("%s Could not find misc partition\n", __func__);
-		return -ENODEV;
-	}
-
+		printf("Could not find misc partition\n");
+	} else {
 #ifdef CONFIG_ANDROID_KEYMASTER_CA
-	/* load attestation key from misc partition. */
-	load_attestation_key(dev_desc, &misc_part_info);
+		/* load attestation key from misc partition. */
+		load_attestation_key(dev_desc, &misc_part_info);
 #endif
 
-	mode = android_bootloader_load_and_clear_mode(dev_desc, &misc_part_info);
+		mode = android_bootloader_load_and_clear_mode(dev_desc,
+							      &misc_part_info);
 #ifdef CONFIG_RKIMG_BOOTLOADER
-	if (mode == ANDROID_BOOT_MODE_NORMAL) {
-		if (rockchip_get_boot_mode() == BOOT_MODE_RECOVERY)
-			mode = ANDROID_BOOT_MODE_RECOVERY;
-	}
+		if (mode == ANDROID_BOOT_MODE_NORMAL) {
+			if (rockchip_get_boot_mode() == BOOT_MODE_RECOVERY)
+				mode = ANDROID_BOOT_MODE_RECOVERY;
+		}
 #endif
+	}
+
 	printf("ANDROID: reboot reason: \"%s\"\n", android_boot_mode_str(mode));
 
 #ifdef CONFIG_ANDROID_AB
@@ -918,9 +919,47 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	if (rk_avb_get_current_slot(slot_suffix))
 		return -1;
 
-	if (slot_suffix[0] != '_') {
-		printf("There is no bootable slot!\n");
+	AvbOps *ops;
+	AvbABData ab_data;
+	AvbABData ab_data_orig;
+	size_t slot_index_to_boot = 0;
+
+	if (!strncmp(slot_suffix, "_a", 2))
+		slot_index_to_boot = 0;
+	else if (!strncmp(slot_suffix, "_b", 2))
+		slot_index_to_boot = 1;
+	else
+		slot_index_to_boot = 0;
+	ops = avb_ops_user_new();
+	if (ops == NULL) {
+		printf("avb_ops_user_new() failed!\n");
 		return -1;
+	}
+
+	if(load_metadata(ops->ab_ops, &ab_data, &ab_data_orig)) {
+		printf("Can not load metadata\n");
+		return -1;
+	}
+
+	/* ... and decrement tries remaining, if applicable. */
+	if (!ab_data.slots[slot_index_to_boot].successful_boot &&
+		ab_data.slots[slot_index_to_boot].tries_remaining > 0) {
+		ab_data.slots[slot_index_to_boot].tries_remaining -= 1;
+	}
+
+	if (save_metadata_if_changed(ops->ab_ops, &ab_data, &ab_data_orig)) {
+		printf("Can not save metadata\n");
+		return -1;
+	}
+
+	if (slot_suffix[0] != '_') {
+		printf("###There is no bootable slot, bring up lastboot!###\n");
+		if (rk_get_lastboot() == 1)
+			memcpy(slot_suffix, "_b", 2);
+		else if(rk_get_lastboot() == 0)
+			memcpy(slot_suffix, "_a", 2);
+		else
+			return -1;
 	}
 #endif
 
@@ -930,7 +969,8 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 		 * "skip_initramfs" to the cmdline to make it ignore the
 		 * recovery initramfs in the boot partition.
 		 */
-#if defined(CONFIG_ANDROID_AB) && !defined(CONFIG_ANDROID_AVB)
+#if (defined(CONFIG_ANDROID_AB) && !defined(CONFIG_ANDROID_AVB))
+	{
 		char root_partition[20] = {0};
 		char guid_buf[UUID_SIZE] = {0};
 		char root_partuuid[70] = "root=PARTUUID=";
@@ -940,6 +980,7 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 		get_partition_unique_uuid(root_partition, guid_buf, UUID_SIZE);
 		strcat(root_partuuid, guid_buf);
 		env_update("bootargs", root_partuuid);
+	}
 #endif
 
 #ifdef CONFIG_ANDROID_AB

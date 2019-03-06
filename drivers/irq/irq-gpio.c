@@ -101,15 +101,15 @@ static void generic_gpio_handle_irq(int irq, void *data __always_unused)
 		gpio_irq_ack(bank->regbase, offset_to_bit(pin));
 
 		/*
-		 * if gpio is edge triggered, clear condition before executing
-		 * the handler so that we don't miss edges
+		 * If gpio is edge triggered, clear condition before executing
+		 * the handler, so that we don't miss next edges trigger.
 		 */
 		if (ilr & (1 << pin)) {
 			unmasked = 1;
 			gpio_irq_unmask(bank->regbase, offset_to_bit(pin));
 		}
 
-		_generic_gpio_handle_irq(gpio_irq + pin);
+		__generic_gpio_handle_irq(gpio_irq + pin);
 
 		isr &= ~(1 << pin);
 
@@ -276,6 +276,10 @@ static int gpio_irq_enable(int gpio_irq)
 
 	gpio_irq_unmask(bank->regbase, offset_to_bit(gpio));
 
+	if (bank->use_count == 0)
+		irq_handler_enable(IRQ_GPIO0 + bank->id);
+	bank->use_count++;
+
 	return 0;
 }
 
@@ -292,6 +296,10 @@ static int gpio_irq_disable(int irq)
 		return -EINVAL;
 
 	gpio_irq_mask(bank->regbase, offset_to_bit(gpio));
+
+	if (bank->use_count == 1)
+		irq_handler_disable(IRQ_GPIO0 + bank->id);
+	bank->use_count--;
 
 	return 0;
 }
@@ -311,8 +319,8 @@ static int gpio_irq_init(void)
 			irq_install_handler(IRQ_GPIO0 + bank->id,
 			(interrupt_handler_t *)generic_gpio_handle_irq, NULL);
 
-			/* default enable all gpio group interrupt */
-			irq_handler_enable(IRQ_GPIO0 + bank->id);
+			/* default disable all gpio group interrupt */
+			irq_handler_disable(IRQ_GPIO0 + bank->id);
 		}
 	}
 
