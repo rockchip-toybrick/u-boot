@@ -33,33 +33,6 @@
 		};
 	};
 
-	/* RK3399PRO evb board */
-	rk_key1 {
-		u-boot,dm-pre-reloc;
-		compatible = "rockchip,key";
-		status = "okay";
-		io-channels = <&saradc 2>;
-
-		vol-up-key {
-			u-boot,dm-pre-reloc;
-			linux,code = <KEY_VOLUMEUP>;
-			label = "volume up";
-			rockchip,adc_value = <10>;
-		};
-	};
-
-	vdd_center: vdd-center {
-		compatible = "pwm-regulator";
-		pwms = <&pwm3 0 25000 1>;
-		regulator-name = "vdd_center";
-		regulator-min-microvolt = <800000>;
-		regulator-max-microvolt = <1400000>;
-		regulator-init-microvolt = <950000>;
-		regulator-always-on;
-		regulator-boot-on;
-		status = "okay";
-	};
-
 	vccsys: vccsys {
 		compatible = "regulator-fixed";
 		regulator-name = "vccsys";
@@ -86,7 +59,7 @@
 	vcc5v0_host: vcc5v0-host-en {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc5v0_host";
-		gpio = <&gpio4 25 GPIO_ACTIVE_HIGH>;
+		gpio = <&gpio0 8 GPIO_ACTIVE_HIGH>;
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 		regulator-always-on;
@@ -96,13 +69,13 @@
 	vcc5v0_typec0: vcc5v0-typec0-en {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc5v0_typec0";
-		gpio = <&gpio1 3 GPIO_ACTIVE_HIGH>;
+		gpio = <&gpio0 6 GPIO_ACTIVE_HIGH>;
 	};
 
 	vcc5v0_typec1: vcc5v0-typec1-en {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc5v0_typec1";
-		gpio = <&gpio1 4 GPIO_ACTIVE_HIGH>;
+		gpio = <&gpio0 6 GPIO_ACTIVE_HIGH>;
 	};
 
 	clkin_gmac: external-gmac-clock {
