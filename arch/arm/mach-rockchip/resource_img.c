@@ -304,7 +304,7 @@ next:
 	if (ret != (hdr->e_blks * hdr->e_nums)) {
 		printf("%s: failed to read resource entries, ret=%d\n",
 		       __func__, ret);
-		ret = -ENOMEM;
+		ret = -EIO;
 		goto err;
 	}
 
