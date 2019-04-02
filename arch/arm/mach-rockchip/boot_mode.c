@@ -162,7 +162,9 @@ void rockchip_dnl_mode_check(void)
 			}
 #endif
 			printf("recovery key pressed, entering recovery mode!\n");
+#ifndef CONFIG_DUAL_SYSTEM
 			env_set("reboot_mode", "recovery");
+#endif
 		}
 	}
 }
