@@ -9,6 +9,7 @@
 #include <asm/arch/boot_mode.h>
 #include <asm/arch/chip_info.h>
 #include <write_keybox.h>
+#include <optee_include/OpteeClientInterface.h>
 
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 #include <asm/arch/vendor.h>
@@ -19,6 +20,10 @@
 #define ROCKUSB_INTERFACE_CLASS	0xff
 #define ROCKUSB_INTERFACE_SUB_CLASS	0x06
 #define ROCKUSB_INTERFACE_PROTOCOL	0x05
+
+#define TOYBRICK_SN_ID		0x01
+#define TOYBRICK_MAC_ID	0x03
+#define TOYBRICK_ACT_ID	0xa0
 
 static struct usb_interface_descriptor rkusb_intf_desc = {
 	.bLength		= USB_DT_INTERFACE_SIZE,
@@ -360,14 +365,42 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 							  vhead->size);
 				if (rc < 0)
 					return -EIO;
-			} else {
+			} else if (type == 1){
 				/* RPMB */
 				rc =
 				write_keybox_to_secure_storage((u8 *)data,
 							       vhead->size);
 				if (rc < 0)
 					return -EIO;
-			}
+			} else if (type == 2) {
+
+				if (memcmp(data, "RKSN", 4) != 0) {
+					printf("tag not equal\n");
+					return -EIO;
+				}
+
+				rc = vendor_storage_write(TOYBRICK_SN_ID,//SN
+							  (char __user *)data+8,
+							  64);
+				if (rc < 0)
+					return -EIO;
+
+				rc = vendor_storage_write(TOYBRICK_MAC_ID,//LAN MAC
+							  (char __user *)data+8+64,
+							  6);
+				if (rc < 0)
+					return -EIO;
+
+				if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+64+6)) != 0) {//Seed
+					printf("trusty_write_toybrick_seed error!");
+					return -EIO;
+				}
+				rc = vendor_storage_write(TOYBRICK_ACT_ID,//Activation Code
+							  (char __user *)data+8+64+6+12+16,
+							  8+256);
+				if (rc < 0)
+					return -EIO;
+			} 
 
 			common->residue -= common->data_size;
 
@@ -430,7 +463,7 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 			if (!rc)
 				return -EIO;
 			vhead->size = rc;
-		} else {
+		} else if (type == 1){
 			/* RPMB */
 			rc =
 			read_raw_data_from_secure_storage((u8 *)data,
@@ -438,6 +471,40 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 			if (!rc)
 				return -EIO;
 			vhead->size = rc;
+		} else if (type == 2) {
+
+			rc = vendor_storage_read(TOYBRICK_SN_ID,//SN
+						 (char __user *)data,
+						 64);
+			if (!rc)
+				return -EIO;
+
+			rc = vendor_storage_read(TOYBRICK_MAC_ID,//LAN MAC
+						 (char __user *)data+64,
+						 6);
+			if (!rc)
+				return -EIO;
+
+			if (trusty_read_toybrick_seed((uint32_t *)((char __user *)data+64+6)) != 0) {//Seed
+				printf("trusty_read_toybrick_seed error!");
+				return -EIO;
+			}
+
+			if (trusty_read_toybrick_cpu_id((uint8_t *)data+64+6+12) != 0) {//Chip id
+				printf("trusty_read_toybrick_cpu_id error!");
+				return -EIO;
+			}
+
+			rc = vendor_storage_read(TOYBRICK_ACT_ID,//Activation Code
+						 (char __user *)data+64+6+12+16,
+						 8+256);
+			if (!rc)
+				return -EIO;
+
+			vhead->size = common->data_size-8;
+		} else if (type == 3) {
+			rc=trusty_read_toybrick_cpu_id((uint8_t *)data);
+			vhead->size = common->data_size-8;
 		}
 
 		common->residue   -= common->data_size;
