@@ -1649,7 +1649,7 @@ uint32_t trusty_read_toybrick_cpu_id(uint8_t *buf)
 						TEEC_NONE);
 
 	TeecResult = TEEC_InvokeCommand(&TeecSession,
-					9,
+					8,
 					&TeecOperation,
 					&ErrorOrigin);
 
