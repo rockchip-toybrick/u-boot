@@ -485,10 +485,7 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 			if (!rc)
 				return -EIO;
 
-			if (trusty_read_toybrick_seed((uint32_t *)((char __user *)data+64+6)) != 0) {//Seed
-				printf("trusty_read_toybrick_seed error!");
-				return -EIO;
-			}
+			//Seed, not read for security
 
 			if (trusty_read_toybrick_cpu_id((uint8_t *)data+64+6+12) != 0) {//Chip id
 				printf("trusty_read_toybrick_cpu_id error!");
