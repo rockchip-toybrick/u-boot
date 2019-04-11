@@ -379,6 +379,11 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 					return -EIO;
 				}
 
+				if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+64+6)) != 0) {//Seed
+					printf("trusty_write_toybrick_seed error!");
+					return -EIO;
+				}
+
 				rc = vendor_storage_write(TOYBRICK_SN_ID,//SN
 							  (char __user *)data+8,
 							  64);
@@ -391,10 +396,6 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 				if (rc < 0)
 					return -EIO;
 
-				if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+64+6)) != 0) {//Seed
-					printf("trusty_write_toybrick_seed error!");
-					return -EIO;
-				}
 				rc = vendor_storage_write(TOYBRICK_ACT_ID,//Activation Code
 							  (char __user *)data+8+64+6+12+16,
 							  8+256);
