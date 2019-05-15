@@ -201,8 +201,11 @@ prepare()
 select_toolchain()
 {
 	local absolute_path
-
-	if grep  -q '^CONFIG_ARM64=y' ${OUTDIR}/.config ; then
+	if [ `uname -i` == aarch64 ]; then
+		TOOLCHAIN_GCC=
+		TOOLCHAIN_OBJDUMP=objdump
+		TOOLCHAIN_ADDR2LINE=addr2line
+	elif grep  -q '^CONFIG_ARM64=y' ${OUTDIR}/.config ; then
 		if [ -d ${TOOLCHAIN_ARM64} ]; then
 			absolute_path=$(cd `dirname ${TOOLCHAIN_ARM64}`; pwd)
 			TOOLCHAIN_GCC=${absolute_path}/bin/${GCC_ARM64}
@@ -529,6 +532,7 @@ pack_loader_image()
 		return
 	fi
 
+	cp ${RKTOOLS}/boot_merger ${RKBIN}/${RKTOOLS}/
 	cd ${RKBIN}
 
 	if [ "${mode}" = 'all' ]; then
@@ -559,6 +563,7 @@ pack_trust_image()
 			return
 		fi
 
+		cp ${RKTOOLS}/trust_merger ${RKBIN}/${RKTOOLS}/
 		cd ${RKBIN}
 		${RKTOOLS}/trust_merger ${PLATFORM_SHA} ${PLATFORM_RSA} ${PLATFORM_TRUST_IMG_SIZE} ${BIN_PATH_FIXUP} \
 					${PACK_IGNORE_BL32} ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini
