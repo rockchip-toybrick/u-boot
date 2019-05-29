@@ -643,6 +643,13 @@ config DUAL_SYSTEM
 	help
 	  This enable support for dual system boot.
 
+config ABNORMAL_BOOT_DETECT
+	bool "Support for abnormal boot detect"
+	default n
+	help
+	  This enable support for abnormal boot detect. If system do NOT boot successfully,
+	  it can enter bootrom mode.
+
 menu "Security support"
 
 config HASH
