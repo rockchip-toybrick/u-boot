@@ -40,6 +40,7 @@
 #include <of_live.h>
 #include <dm/root.h>
 #include <console.h>
+#include <boot_rkimg.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 /* define serialno max length, the max length is 512 Bytes
@@ -238,12 +239,60 @@ static void early_bootrom_download(void)
 #endif
 }
 
+#define BLK_OFFSET_31K	62
+#define ABNORMAL_BOOT_COUNT	2
+static long abnormal_boot_detect(void)
+{
+#ifdef CONFIG_ABNORMAL_BOOT_DETECT
+	long ret;
+	char *buf;
+	struct blk_desc *dev_desc;
+	char flag;
+	dev_desc = rockchip_get_bootdev();
+	lbaint_t start = BLK_OFFSET_31K;
+
+	buf = (char *)memalign(ARCH_DMA_MINALIGN, RK_BLK_SIZE);
+	if(!buf) {
+		printf("%s: out of memory!\n", __func__);
+		return -ENOMEM;
+	}
+
+	ret = blk_dread(dev_desc, start, 1, buf);
+	if(ret < 0) {
+		printf("%s: failed to get abnormal boot flag, ret=%lu\n",
+				__func__, ret);
+		return ret;
+	}
+
+	flag = buf[0];
+	if(flag < ABNORMAL_BOOT_COUNT) {
+		printf("Abnormal boot count: %d\n", flag);
+		flag++;
+		buf[0] = flag;
+		ret = blk_dwrite(dev_desc, start, 1, buf); 
+	} else {
+		buf[0] = 0;
+		ret = blk_dwrite(dev_desc, start, 1, buf); 
+		printf("Enter bootrom download...");
+		mdelay(100);
+		writel(BOOT_BROM_DOWNLOAD, CONFIG_ROCKCHIP_BOOT_MODE_REG);
+		do_reset(NULL, 0, 0, NULL);
+		printf("failed!\n");
+	}
+
+	return ret;
+#else
+	return 0;
+#endif
+}
+
 int board_init(void)
 {
 	int ret;
 
 	board_debug_uart_init();
 	early_bootrom_download();
+	abnormal_boot_detect();
 
 #ifdef CONFIG_USING_KERNEL_DTB
 	init_kernel_dtb();
