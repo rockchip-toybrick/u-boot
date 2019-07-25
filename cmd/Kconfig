@@ -233,6 +233,7 @@ config CMD_BOOTMENU
 
 config CMD_DTIMG
 	bool "dtimg"
+	select OF_LIBFDT_OVERLAY
 	help
 	  Android DTB/DTBO image manipulation commands. Read dtb/dtbo files from
 	  image into RAM, dump image structure information, etc. Those dtb/dtbo
@@ -531,6 +532,15 @@ config CMD_STRINGS
 	  within the range are displayed. The minimum number of characters
 	  for a sequence to be considered a string can be provided.
 
+config CMD_CRYPTO
+	bool "crypto test"
+	depends on DM_CRYPTO
+	select SHA1
+	select SHA256
+	select MD5
+	help
+	  Crypto test.
+
 endmenu
 
 menu "Compression commands"
@@ -807,6 +817,12 @@ config CMD_MMC
 	bool "mmc"
 	help
 	  MMC memory mapped support.
+
+config CMD_MTD
+	bool "mtd"
+	select MTD_PARTITIONS
+	help
+	  MTD commands support.
 
 config CMD_NAND
 	bool "nand"
@@ -1298,6 +1314,8 @@ config CMD_REGULATOR
 
 config CMD_CHARGE_DISPLAY
 	bool "Enable Driver Model Charge Display command"
+	depends on DM_CHARGE_DISPLAY
+	default y
 	help
 	  Support U-Boot charge display.
 
@@ -1483,18 +1501,29 @@ config CMD_JFFS2
 
 config CMD_MTDPARTS
 	bool "MTD partition support"
+	select MTD_DEVICE if (CMD_NAND || NAND)
 	help
 	  MTD partition support
 
+config CMD_MTD
+	bool "MTD support"
+	help
+	  MTD support
+
+config CMD_MTD_BLK
+	bool "MTD block support"
+	help
+	  MTD block support
+
 config MTDIDS_DEFAULT
 	string "Default MTD IDs"
-	depends on CMD_MTDPARTS
+	depends on CMD_MTD || CMD_MTDPARTS || CMD_NAND || CMD_FLASH
 	help
 	  Defines a default MTD ID
 
 config MTDPARTS_DEFAULT
 	string "Default MTD partition scheme"
-	depends on CMD_MTDPARTS
+	depends on CMD_MTD || CMD_MTDPARTS || CMD_NAND || CMD_FLASH
 	help
 	  Defines a default MTD partitioning scheme in the Linux MTD command
 	  line partitions format

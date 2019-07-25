@@ -41,8 +41,6 @@
 /* commands to include */
 
 #ifdef CONFIG_NAND
-#define CONFIG_MTD_PARTITIONS	/* required for UBI partition support */
-
 /* NAND block size is 128 KiB.  Synchronize these values with
  * overo_nand_partitions in mach-omap2/board-overo.c in Linux:
  *  xloader              4 * NAND_BLOCK_SIZE = 512 KiB
@@ -193,7 +191,6 @@
 #define CONFIG_SYS_INIT_RAM_SIZE	0x800
 
 /* NAND boot config */
-#define CONFIG_SYS_NAND_BUSWIDTH_16BIT
 #define CONFIG_SYS_NAND_MAX_ECCPOS  56
 #define CONFIG_SYS_NAND_5_ADDR_CYCLE
 #define CONFIG_SYS_NAND_PAGE_COUNT	64

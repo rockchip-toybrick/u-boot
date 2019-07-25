@@ -154,12 +154,14 @@ int rk_avb_get_current_slot(char *select_slot)
 	}
 
 	if (rk_avb_ab_slot_select(ops->ab_ops, select_slot) != 0) {
+#ifndef CONFIG_ANDROID_AVB
 		printf("###There is no bootable slot, bring up last_boot!###\n");
 		if (rk_get_lastboot() == 1)
 			memcpy(select_slot, "_b", 2);
 		else if(rk_get_lastboot() == 0)
 			memcpy(select_slot, "_a", 2);
 		else
+#endif
 			return -1;
 		ret = 0;
 	}
@@ -766,4 +768,31 @@ out:
 	avb_ops_user_free(ops);
 
 	return lastboot;
+}
+
+int rk_avb_init_ab_metadata(void)
+{
+	AvbOps *ops;
+	AvbABData ab_data;
+
+	memset(&ab_data, 0, sizeof(AvbABData));
+	debug("sizeof(AvbABData) = %d\n", (int)(size_t)sizeof(AvbABData));
+
+	ops = avb_ops_user_new();
+	if (ops == NULL) {
+		printf("avb_ops_user_new() failed!\n");
+		return -1;
+	}
+
+	avb_ab_data_init(&ab_data);
+	if (ops->ab_ops->write_ab_metadata(ops->ab_ops, &ab_data) != 0) {
+		printf("do_avb_init_ab_metadata error!\n");
+		avb_ops_user_free(ops);
+		return -1;
+	}
+
+	printf("Initialize ab data to misc partition success.\n");
+	avb_ops_user_free(ops);
+
+	return 0;
 }

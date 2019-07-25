@@ -194,36 +194,27 @@ ulong android_image_get_kload(const struct andr_img_hdr *hdr)
 int android_image_get_ramdisk(const struct andr_img_hdr *hdr,
 			      ulong *rd_data, ulong *rd_len)
 {
-	bool avb_enabled = false;
-
-#ifdef CONFIG_ANDROID_BOOTLOADER
-	avb_enabled = android_avb_is_enabled();
-#endif
-
 	if (!hdr->ramdisk_size) {
 		*rd_data = *rd_len = 0;
 		return -1;
 	}
 
-	/*
-	 * We have load ramdisk at "ramdisk_addr_r" when android avb is
-	 * disabled and CONFIG_ANDROID_BOOT_IMAGE_SEPARATE enabled.
-	 */
-	if (!avb_enabled && IS_ENABLED(CONFIG_ANDROID_BOOT_IMAGE_SEPARATE)) {
-		ulong ramdisk_addr_r;
+	/* We have load ramdisk at "ramdisk_addr_r" */
+#ifdef CONFIG_ANDROID_BOOT_IMAGE_SEPARATE
+	ulong ramdisk_addr_r;
 
-		ramdisk_addr_r = env_get_ulong("ramdisk_addr_r", 16, 0);
-		if (!ramdisk_addr_r) {
-			printf("No Found Ramdisk Load Address.\n");
-			return -1;
-		}
-
-		*rd_data = ramdisk_addr_r;
-	} else {
-		*rd_data = (unsigned long)hdr;
-		*rd_data += hdr->page_size;
-		*rd_data += ALIGN(hdr->kernel_size, hdr->page_size);
+	ramdisk_addr_r = env_get_ulong("ramdisk_addr_r", 16, 0);
+	if (!ramdisk_addr_r) {
+		printf("No Found Ramdisk Load Address.\n");
+		return -1;
 	}
+
+	*rd_data = ramdisk_addr_r;
+#else
+	*rd_data = (unsigned long)hdr;
+	*rd_data += hdr->page_size;
+	*rd_data += ALIGN(hdr->kernel_size, hdr->page_size);
+#endif
 
 	*rd_len = hdr->ramdisk_size;
 
@@ -236,94 +227,105 @@ int android_image_get_ramdisk(const struct andr_img_hdr *hdr,
 int android_image_get_fdt(const struct andr_img_hdr *hdr,
 			      ulong *rd_data)
 {
-	bool avb_enabled = false;
-
-#ifdef CONFIG_ANDROID_BOOTLOADER
-	avb_enabled = android_avb_is_enabled();
-#endif
-
 	if (!hdr->second_size) {
 		*rd_data = 0;
 		return -1;
 	}
 
-	/*
-	 * We have load fdt at "fdt_addr_r" when android avb is
-	 * disabled and CONFIG_ANDROID_BOOT_IMAGE_SEPARATE enabled;
-	 * or CONFIG_USING_KERNEL_DTB is enabled.
-	 */
-	if (IS_ENABLED(CONFIG_USING_KERNEL_DTB) ||
-	    (!avb_enabled && IS_ENABLED(CONFIG_ANDROID_BOOT_IMAGE_SEPARATE))) {
-		ulong fdt_addr_r;
+	/* We have load fdt at "fdt_addr_r" */
+#if defined(CONFIG_USING_KERNEL_DTB) || \
+    defined(CONFIG_ANDROID_BOOT_IMAGE_SEPARATE)
+	ulong fdt_addr_r;
 
-		fdt_addr_r = env_get_ulong("fdt_addr_r", 16, 0);
-		if (!fdt_addr_r) {
-			printf("No Found FDT Load Address.\n");
-			return -1;
-		}
-
-		*rd_data = fdt_addr_r;
-	} else {
-		*rd_data = (unsigned long)hdr;
-		*rd_data += hdr->page_size;
-		*rd_data += ALIGN(hdr->kernel_size, hdr->page_size);
-		*rd_data += ALIGN(hdr->ramdisk_size, hdr->page_size);
+	fdt_addr_r = env_get_ulong("fdt_addr_r", 16, 0);
+	if (!fdt_addr_r) {
+		printf("No Found FDT Load Address.\n");
+		return -1;
 	}
 
-	printf("FDT load addr 0x%08x size %u KiB\n",
-	       hdr->second_addr, DIV_ROUND_UP(hdr->second_size, 1024));
+	*rd_data = fdt_addr_r;
+#else
+	*rd_data = (unsigned long)hdr;
+	*rd_data += hdr->page_size;
+	*rd_data += ALIGN(hdr->kernel_size, hdr->page_size);
+	*rd_data += ALIGN(hdr->ramdisk_size, hdr->page_size);
+#endif
+
+	debug("FDT load addr 0x%08x size %u KiB\n",
+	      hdr->second_addr, DIV_ROUND_UP(hdr->second_size, 1024));
 
 	return 0;
 }
 
 #ifdef CONFIG_ANDROID_BOOT_IMAGE_SEPARATE
-static int android_image_load_separate(struct blk_desc *dev_desc,
-				       struct andr_img_hdr *hdr,
-				       const disk_partition_t *part,
-				       void *android_load_address)
+int android_image_load_separate(struct andr_img_hdr *hdr,
+				const disk_partition_t *part,
+				void *load_address, void *ram_src)
 {
+	struct blk_desc *dev_desc = rockchip_get_bootdev();
 	ulong fdt_addr_r = env_get_ulong("fdt_addr_r", 16, 0);
+	char *fdt_high = env_get("fdt_high");
+	char *ramdisk_high = env_get("initrd_high");
 	ulong blk_start, blk_cnt, size;
 	int ret, blk_read = 0;
+	ulong start;
+
+	if (android_image_check_header(hdr)) {
+		printf("Bad android image header\n");
+		return -EINVAL;
+	}
 
 	if (hdr->kernel_size) {
 		size = hdr->kernel_size + hdr->page_size;
-		blk_start = part->start;
 		blk_cnt = DIV_ROUND_UP(size, dev_desc->blksz);
-		if (!sysmem_alloc_base("kernel",
-				       (phys_addr_t)android_load_address,
+		if (!sysmem_alloc_base(MEMBLK_ID_KERNEL,
+				       (phys_addr_t)load_address,
 				       blk_cnt * dev_desc->blksz))
 			return -ENXIO;
 
-		ret = blk_dread(dev_desc, blk_start,
-				blk_cnt, android_load_address);
-		if (ret < 0) {
-			debug("%s: read kernel failed, ret=%d\n",
-			      __func__, ret);
-			return ret;
+		if (ram_src) {
+			start = (ulong)ram_src;
+			memcpy((char *)load_address, (char *)start, size);
+		} else {
+			blk_start = part->start;
+			ret = blk_dread(dev_desc, blk_start,
+					blk_cnt, load_address);
+			if (ret != blk_cnt) {
+				printf("%s: read kernel failed, ret=%d\n",
+				      __func__, ret);
+				return -1;
+			}
+			blk_read += ret;
 		}
-		blk_read += ret;
 	}
 
 	if (hdr->ramdisk_size) {
 		ulong ramdisk_addr_r = env_get_ulong("ramdisk_addr_r", 16, 0);
 
 		size = hdr->page_size + ALIGN(hdr->kernel_size, hdr->page_size);
-		blk_start = part->start + DIV_ROUND_UP(size, dev_desc->blksz);
 		blk_cnt = DIV_ROUND_UP(hdr->ramdisk_size, dev_desc->blksz);
-		if (!sysmem_alloc_base("ramdisk",
+		if (!sysmem_alloc_base(MEMBLK_ID_RAMDISK,
 				       ramdisk_addr_r,
 				       blk_cnt * dev_desc->blksz))
 			return -ENXIO;
-
-		ret = blk_dread(dev_desc, blk_start,
-				blk_cnt, (void *)ramdisk_addr_r);
-		if (ret < 0) {
-			debug("%s: read ramdisk failed, ret=%d\n",
-			      __func__, ret);
-			return ret;
+		if (ram_src) {
+			start = (unsigned long)ram_src;
+			start += hdr->page_size;
+			start += ALIGN(hdr->kernel_size, hdr->page_size);
+			memcpy((char *)ramdisk_addr_r,
+			       (char *)start, hdr->ramdisk_size);
+		} else {
+			blk_start = part->start +
+				DIV_ROUND_UP(size, dev_desc->blksz);
+			ret = blk_dread(dev_desc, blk_start,
+					blk_cnt, (void *)ramdisk_addr_r);
+			if (ret != blk_cnt) {
+				printf("%s: read ramdisk failed, ret=%d\n",
+				      __func__, ret);
+				return -1;
+			}
+			blk_read += ret;
 		}
-		blk_read += ret;
 	}
 
 	if ((gd->fdt_blob != (void *)fdt_addr_r) && hdr->second_size) {
@@ -345,22 +347,47 @@ static int android_image_load_separate(struct blk_desc *dev_desc,
 		size = hdr->page_size +
 		       ALIGN(hdr->kernel_size, hdr->page_size) +
 		       ALIGN(hdr->ramdisk_size, hdr->page_size);
-		blk_start = part->start + DIV_ROUND_UP(size, dev_desc->blksz);
 		blk_cnt = DIV_ROUND_UP(hdr->second_size, dev_desc->blksz);
-		if (!sysmem_alloc_base("fdt(AOSP)",
+		if (!sysmem_alloc_base(MEMBLK_ID_FDT_AOSP,
 				       fdt_addr_r,
 				       blk_cnt * dev_desc->blksz +
 				       CONFIG_SYS_FDT_PAD))
 			return -ENXIO;
 
-		ret = blk_dread(dev_desc, blk_start, blk_cnt, (void *)fdt_addr_r);
-		if (ret < 0) {
-			debug("%s: read dtb failed, ret=%d\n", __func__, ret);
-			return ret;
-		}
+		if (ram_src) {
+			start = (unsigned long)ram_src;
+			start += hdr->page_size;
+			start += ALIGN(hdr->kernel_size, hdr->page_size);
+			start += ALIGN(hdr->ramdisk_size, hdr->page_size);
+			memcpy((char *)fdt_addr_r,
+			       (char *)start, hdr->second_size);
+		} else {
+			blk_start = part->start +
+					DIV_ROUND_UP(size, dev_desc->blksz);
+			ret = blk_dread(dev_desc, blk_start, blk_cnt,
+					(void *)fdt_addr_r);
+			if (ret != blk_cnt) {
+				printf("%s: read dtb failed, ret=%d\n",
+				      __func__, ret);
+				return -1;
+			}
 
-		blk_read += blk_cnt;
+			blk_read += blk_cnt;
+		}
 #endif /* CONFIG_RKIMG_BOOTLOADER */
+	}
+
+	if (blk_read > 0 || ram_src) {
+		if (!fdt_high) {
+			env_set_hex("fdt_high", -1UL);
+			printf("Fdt ");
+		}
+		if (!ramdisk_high) {
+			env_set_hex("initrd_high", -1UL);
+			printf("Ramdisk ");
+		}
+		if (!fdt_high || !ramdisk_high)
+			printf("skip relocation\n");
 	}
 
 	return blk_read;
@@ -413,15 +440,32 @@ long android_image_load(struct blk_desc *dev_desc,
 			   part_info->blksz - 1) / part_info->blksz;
 		comp = android_image_parse_kernel_comp(hdr);
 		/*
-		 * We should load a compressed kernel Image
-		 * to high memory
+		 * We should load compressed kernel Image to high memory at
+		 * address "kernel_addr_c".
 		 */
 		if (comp != IH_COMP_NONE) {
-			load_address += android_image_get_ksize(hdr) * 3;
-			load_address = env_get_ulong("kernel_addr_c", 16, load_address);
-			load_address -= hdr->page_size;
-			unmap_sysmem(buf);
-			buf = map_sysmem(load_address, 0 /* size */);
+			ulong kernel_addr_c;
+
+			env_set_ulong("os_comp", comp);
+			kernel_addr_c = env_get_ulong("kernel_addr_c", 16, 0);
+			if (kernel_addr_c) {
+				load_address = kernel_addr_c - hdr->page_size;
+				unmap_sysmem(buf);
+				buf = map_sysmem(load_address, 0 /* size */);
+			}
+#ifdef CONFIG_ARM64
+			else {
+				printf("Warn: \"kernel_addr_c\" is not defined "
+				       "for compressed kernel Image!\n");
+				load_address += android_image_get_ksize(hdr) * 3;
+				load_address = ALIGN(load_address, ARCH_DMA_MINALIGN);
+				env_set_ulong("kernel_addr_c", load_address);
+
+				load_address -= hdr->page_size;
+				unmap_sysmem(buf);
+				buf = map_sysmem(load_address, 0 /* size */);
+			}
+#endif
 		}
 
 		if (blk_cnt * part_info->blksz > max_size) {
@@ -434,36 +478,17 @@ long android_image_load(struct blk_desc *dev_desc,
 			      blk_cnt, load_address);
 
 #ifdef CONFIG_ANDROID_BOOT_IMAGE_SEPARATE
-			if (!android_avb_is_enabled()) {
-				char *fdt_high = env_get("fdt_high");
-				char *ramdisk_high = env_get("initrd_high");
+			blk_read =
+			android_image_load_separate(hdr, part_info, buf, NULL);
+#else
+			if (!sysmem_alloc_base(MEMBLK_ID_ANDROID,
+					       (phys_addr_t)buf,
+						blk_cnt * part_info->blksz))
+				return -ENXIO;
 
-				blk_read =
-				android_image_load_separate(dev_desc, hdr,
-							    part_info, buf);
-				if (blk_read > 0) {
-					if (!fdt_high) {
-						env_set_hex("fdt_high", -1UL);
-						printf("Fdt ");
-					}
-					if (!ramdisk_high) {
-						env_set_hex("initrd_high", -1UL);
-						printf("Ramdisk ");
-					}
-					if (!fdt_high || !ramdisk_high)
-						printf("skip relocation\n");
-				}
-			} else
+			blk_read = blk_dread(dev_desc, part_info->start,
+					     blk_cnt, buf);
 #endif
-			{
-				if (!sysmem_alloc_base("android",
-						       (phys_addr_t)buf,
-							blk_cnt * part_info->blksz))
-					return -ENXIO;
-
-				blk_read = blk_dread(dev_desc, part_info->start,
-						     blk_cnt, buf);
-			}
 		}
 
 		/*

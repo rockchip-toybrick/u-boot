@@ -42,7 +42,10 @@ enum log_category_t {
 	LOGC_ARCH,
 	LOGC_BOARD,
 	LOGC_CORE,
-	LOGC_DT,
+	LOGC_DM,	/* Core driver-model */
+	LOGC_DT,	/* Device-tree */
+	LOGC_EFI,	/* EFI implementation */
+	LOGC_ALLOC,	/* Memory allocation */
 
 	LOGC_COUNT,
 	LOGC_END,
@@ -155,6 +158,25 @@ void __assert_fail(const char *assertion, const char *file, unsigned int line,
 #define assert(x) \
 	({ if (!(x) && _DEBUG) \
 		__assert_fail(#x, __FILE__, __LINE__, __func__); })
+
+#ifdef CONFIG_LOG_ERROR_RETURN
+#define log_ret(_ret) ({ \
+	int __ret = (_ret); \
+	if (__ret < 0) \
+		log(LOG_CATEGORY, LOGL_ERR, "returning err=%d\n", __ret); \
+	__ret; \
+	})
+#define log_msg_ret(_msg, _ret) ({ \
+	int __ret = (_ret); \
+	if (__ret < 0) \
+		log(LOG_CATEGORY, LOGL_ERR, "%s: returning err=%d\n", _msg, \
+		    __ret); \
+	__ret; \
+	})
+#else
+#define log_ret(_ret) (_ret)
+#define log_msg_ret(_msg, _ret) (_ret)
+#endif
 
 /**
  * struct log_rec - a single log record

@@ -31,6 +31,7 @@ obj-y += initcall.o
 obj-$(CONFIG_LMB) += lmb.o
 ifdef CONFIG_LMB
 obj-$(CONFIG_SYSMEM) += sysmem.o
+obj-$(CONFIG_BIDRAM) += bidram.o
 endif
 obj-y += ldiv.o
 obj-$(CONFIG_LZ4) += lz4_wrapper.o
@@ -89,8 +90,10 @@ obj-y += linux_string.o
 obj-y += membuff.o
 obj-$(CONFIG_REGEX) += slre.o
 obj-y += string.o
+obj-y += stdlib.o
 obj-y += tables_csum.o
 obj-y += time.o
+obj-y += hexdump.o
 obj-$(CONFIG_TRACE) += trace.o
 obj-$(CONFIG_LIB_UUID) += uuid.o
 obj-$(CONFIG_LIB_RAND) += rand.o

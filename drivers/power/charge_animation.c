@@ -35,7 +35,7 @@ DECLARE_GLOBAL_DATA_PTR;
 #define IMAGE_RESET_IDX				-1
 #define IMAGE_SOC_100_IDX(n)			((n) - 2)
 #define IMAGE_LOWPOWER_IDX(n)			((n) - 1)
-
+#define SYSTEM_SUSPEND_DELAY_MS			5000
 #define FUEL_GAUGE_POLL_MS			1000
 
 #define LED_CHARGING_NAME			"battery_charging"
@@ -50,6 +50,7 @@ struct charge_image {
 struct charge_animation_priv {
 	struct udevice *pmic;
 	struct udevice *fg;
+	struct udevice *charger;
 	struct udevice *rtc;
 #ifdef CONFIG_LED
 	struct udevice *led_charging;
@@ -59,7 +60,8 @@ struct charge_animation_priv {
 	int image_num;
 
 	int auto_wakeup_key_state;
-	ulong auto_screen_off_timeout;
+	ulong auto_screen_off_timeout;	/* ms */
+	ulong suspend_delay_timeout;	/* ms */
 };
 
 /*
@@ -169,8 +171,8 @@ static int check_key_press(struct udevice *dev)
  * If not enable CONFIG_IRQ, cpu can't suspend to ATF or wfi, so that wakeup
  * period timer is useless.
  */
-#ifndef CONFIG_IRQ
-static int system_suspend_enter(struct charge_animation_pdata *pdata)
+#if !defined(CONFIG_IRQ) || !defined(CONFIG_ARM_CPU_SUSPEND)
+static int system_suspend_enter(struct udevice *dev)
 {
 	return 0;
 }
@@ -179,8 +181,23 @@ static void autowakeup_timer_init(struct udevice *dev, uint32_t seconds) {}
 static void autowakeup_timer_uninit(void) {}
 
 #else
-static int system_suspend_enter(struct charge_animation_pdata *pdata)
+static int system_suspend_enter(struct udevice *dev)
 {
+	struct charge_animation_pdata *pdata = dev_get_platdata(dev);
+	struct charge_animation_priv *priv = dev_get_priv(dev);
+
+	/*
+	 * When cpu is in wfi and we try to give a long key press event without
+	 * key release, cpu would wakeup and enter wfi again immediately. So
+	 * here is the problem: cpu can only wakeup when long key released.
+	 *
+	 * Actually, we want cpu can detect long key event without key release,
+	 * so we give a suspend delay timeout for cpu to detect this.
+	 */
+	if (priv->suspend_delay_timeout &&
+	    get_timer(priv->suspend_delay_timeout) <= SYSTEM_SUSPEND_DELAY_MS)
+		return 0;
+
 	if (pdata->system_suspend && IS_ENABLED(CONFIG_ARM_SMCCC)) {
 		printf("\nSystem suspend: ");
 		putc('0');
@@ -209,7 +226,10 @@ static int system_suspend_enter(struct charge_animation_pdata *pdata)
 	} else {
 		printf("\nWfi\n");
 		wfi();
+		putc('1');
 	}
+
+	priv->suspend_delay_timeout = get_timer(0);
 
 	/*
 	 * We must wait for key release event finish, otherwise
@@ -308,6 +328,16 @@ static int leds_update(struct udevice *dev, int soc)
 static int leds_update(struct udevice *dev, int soc) { return 0; }
 #endif
 
+static int fg_charger_get_chrg_online(struct udevice *dev)
+{
+	struct charge_animation_priv *priv = dev_get_priv(dev);
+	struct udevice *charger;
+
+	charger = priv->charger ? : priv->fg;
+
+	return fuel_gauge_get_chrg_online(charger);
+}
+
 static int charge_extrem_low_power(struct udevice *dev)
 {
 	struct charge_animation_pdata *pdata = dev_get_platdata(dev);
@@ -324,7 +354,7 @@ static int charge_extrem_low_power(struct udevice *dev)
 
 	while (voltage < pdata->low_power_voltage + 50) {
 		/* Check charger online */
-		charging = fuel_gauge_get_chrg_online(fg);
+		charging = fg_charger_get_chrg_online(dev);
 		if (charging <= 0) {
 			printf("%s: Not charging, online=%d. Shutdown...\n",
 			       __func__, charging);
@@ -362,13 +392,18 @@ static int charge_extrem_low_power(struct udevice *dev)
 		       pdata->low_power_voltage, voltage);
 
 		/* System suspend */
-		system_suspend_enter(pdata);
+		system_suspend_enter(dev);
 
 		/* Update voltage */
 		voltage = fuel_gauge_get_voltage(fg);
 		if (voltage < 0) {
 			printf("get voltage failed: %d\n", voltage);
 			continue;
+		}
+
+		if (ctrlc()) {
+			printf("Extrem low charge: exit by ctrl+c\n");
+			break;
 		}
 	}
 
@@ -437,7 +472,7 @@ static int charge_animation_show(struct udevice *dev)
 #endif
 
 	/* Not charger online, exit */
-	charging = fuel_gauge_get_chrg_online(fg);
+	charging = fg_charger_get_chrg_online(dev);
 	if (charging <= 0) {
 		printf("Exit charge: due to charger offline\n");
 		return 0;
@@ -506,7 +541,7 @@ static int charge_animation_show(struct udevice *dev)
 		local_irq_disable();
 
 		/* Step1: Is charging now ? */
-		charging = fuel_gauge_get_chrg_online(fg);
+		charging = fg_charger_get_chrg_online(dev);
 		if (charging <= 0) {
 			printf("Not charging, online=%d. Shutdown...\n",
 			       charging);
@@ -629,8 +664,7 @@ show_images:
 				priv->auto_screen_off_timeout = get_timer(0);
 		} else {
 			priv->auto_screen_off_timeout = 0;
-
-			system_suspend_enter(pdata);
+			system_suspend_enter(dev);
 		}
 
 		mdelay(5);
@@ -673,13 +707,18 @@ show_images:
 			if (screen_on) {
 				charge_show_bmp(NULL); /* Turn off screen */
 				screen_on = false;
+				priv->suspend_delay_timeout = get_timer(0);
 			} else {
 				screen_on = true;
 			}
+
+			printf("screen %s\n", screen_on ? "on" : "off");
 		} else if (key_state == KEY_PRESS_LONG_DOWN) {
 			/* Set screen_on=true anyway when key long pressed */
 			if (!screen_on)
 				screen_on = true;
+
+			printf("screen %s\n", screen_on ? "on" : "off");
 
 			/* Is able to boot now ? */
 			if (soc < pdata->exit_charge_level) {
@@ -732,6 +771,37 @@ show_images:
 	return 0;
 }
 
+static int fg_charger_get_device(struct udevice **fuel_gauge,
+				 struct udevice **charger)
+{
+	struct udevice *dev;
+	struct uclass *uc;
+	int ret, cap;
+
+	*fuel_gauge = NULL,
+	*charger = NULL;
+
+	ret = uclass_get(UCLASS_FG, &uc);
+	if (ret)
+		return ret;
+
+	for (uclass_first_device(UCLASS_FG, &dev);
+	     dev;
+	     uclass_next_device(&dev)) {
+		cap = fuel_gauge_capability(dev);
+		if (cap == (FG_CAP_CHARGER | FG_CAP_FUEL_GAUGE)) {
+			*fuel_gauge = dev;
+			*charger = NULL;
+		} else if (cap == FG_CAP_FUEL_GAUGE) {
+			*fuel_gauge = dev;
+		} else if (cap == FG_CAP_CHARGER) {
+			*charger = dev;
+		}
+	}
+
+	return (*fuel_gauge) ? 0 : -ENODEV;
+}
+
 static const struct dm_charge_display_ops charge_animation_ops = {
 	.show = charge_animation_show,
 };
@@ -751,8 +821,8 @@ static int charge_animation_probe(struct udevice *dev)
 		return ret;
 	}
 
-	/* Get fuel gauge: used for charging */
-	ret = uclass_get_device(UCLASS_FG, 0, &priv->fg);
+	/* Get fuel gauge and charger(If need) */
+	ret = fg_charger_get_device(&priv->fg, &priv->charger);
 	if (ret) {
 		if (ret == -ENODEV)
 			debug("Can't find FG\n");

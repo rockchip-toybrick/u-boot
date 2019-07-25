@@ -45,7 +45,10 @@ uint32_t test_optee(void)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -167,7 +170,10 @@ uint32_t trusty_read_rollback_index(uint32_t slot, uint64_t *value)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -260,7 +266,10 @@ uint32_t trusty_write_rollback_index(uint32_t slot, uint64_t value)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -354,7 +363,11 @@ uint32_t trusty_read_permanent_attributes(uint8_t *attributes, uint32_t size)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -446,7 +459,11 @@ uint32_t trusty_write_permanent_attributes(uint8_t *attributes, uint32_t size)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -542,8 +559,11 @@ uint32_t trusty_read_permanent_attributes_cer(uint8_t *attributes,
 						    TEEC_NONE,
 						    TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a =
-		(dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -629,8 +649,11 @@ uint32_t trusty_write_permanent_attributes_cer(uint8_t *attributes,
 						    TEEC_NONE,
 						    TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a =
-		(dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -715,7 +738,11 @@ uint32_t trusty_read_lock_state(uint8_t *lock_state)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -807,7 +834,11 @@ uint32_t trusty_write_lock_state(uint8_t lock_state)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -901,7 +932,11 @@ uint32_t trusty_read_flash_lock_state(uint8_t *flash_lock_state)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -994,7 +1029,11 @@ uint32_t trusty_write_flash_lock_state(uint8_t flash_lock_state)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -1054,7 +1093,6 @@ exit:
 	TEEC_ReleaseSharedMemory(&SharedMem1);
 	TEEC_CloseSession(&TeecSession);
 	TEEC_FinalizeContext(&TeecContext);
-	debug("testmm end\n");
 
 	return TeecResult;
 }
@@ -1466,8 +1504,13 @@ uint32_t trusty_read_vbootkey_enable_flag(uint8_t *flag)
 
 	if (TeecResult == TEEC_SUCCESS) {
 		memcpy(&bootflag, SharedMem0.buffer, SharedMem0.size);
+#if defined(CONFIG_ROCKCHIP_RK3288)
+		if (bootflag == 0x00000001)
+			*flag = 1;
+#else
 		if (bootflag == 0x000000FF)
 			*flag = 1;
+#endif
 	}
 exit:
 	TEEC_ReleaseSharedMemory(&SharedMem0);
@@ -1632,7 +1675,11 @@ uint32_t trusty_read_permanent_attributes_flag(uint8_t *attributes)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -1723,7 +1770,11 @@ uint32_t trusty_write_permanent_attributes_flag(uint8_t attributes)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -1819,7 +1870,11 @@ uint32_t trusty_attest_dh(uint8_t *dh, uint32_t *dh_size)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -1901,7 +1956,11 @@ uint32_t trusty_attest_uuid(uint8_t *uuid, uint32_t *uuid_size)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -1988,7 +2047,11 @@ uint32_t trusty_attest_get_ca(uint8_t *operation_start,
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif
@@ -2084,7 +2147,11 @@ uint32_t trusty_attest_set_ca(uint8_t *ca_response, uint32_t *ca_response_size)
 						TEEC_NONE,
 						TEEC_NONE);
 	/*0 nand or emmc "security" partition , 1 rpmb*/
-	TeecOperation.params[0].value.a = (dev_desc->if_type == IF_TYPE_MMC) ? 1 : 0;
+	if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 0)
+		TeecOperation.params[0].value.a = 1;
+	else
+		TeecOperation.params[0].value.a = 0;
+
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
 	TeecOperation.params[0].value.a = 0;
 #endif

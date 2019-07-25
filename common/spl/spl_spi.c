@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2011 OMICRON electronics GmbH
  *
- * based on drivers/mtd/nand/nand_spl_load.c
+ * based on drivers/mtd/nand/raw/nand_spl_load.c
  *
  * Copyright (C) 2011
  * Heiko Schocher, DENX Software Engineering, hs@denx.de.
@@ -78,6 +78,8 @@ static int spl_spi_load_image(struct spl_image_info *spl_image,
 
 	/*
 	 * Load U-Boot image from SPI flash into RAM
+	 * In DM mode: defaults speed and mode will be
+	 * taken from DT when available
 	 */
 
 	flash = spi_flash_probe(CONFIG_SF_DEFAULT_BUS,

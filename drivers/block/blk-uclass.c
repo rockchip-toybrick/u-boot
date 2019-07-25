@@ -28,7 +28,7 @@ static const char *if_typename_str[IF_TYPE_COUNT] = {
 	[IF_TYPE_SPINAND]	= "spinand",
 	[IF_TYPE_SPINOR]	= "spinor",
 	[IF_TYPE_RAMDISK]	= "ramdisk",
-
+	[IF_TYPE_MTD]		= "mtd",
 };
 
 static enum uclass_id if_type_uclass_id[IF_TYPE_COUNT] = {
@@ -46,10 +46,11 @@ static enum uclass_id if_type_uclass_id[IF_TYPE_COUNT] = {
 	[IF_TYPE_SPINAND]	= UCLASS_SPI_FLASH,
 	[IF_TYPE_SPINOR]	= UCLASS_SPI_FLASH,
 	[IF_TYPE_RAMDISK]	= UCLASS_RAMDISK,
+	[IF_TYPE_MTD]		= UCLASS_MTD,
 	[IF_TYPE_SYSTEMACE]	= UCLASS_INVALID,
 };
 
-static enum if_type if_typename_to_iftype(const char *if_typename)
+enum if_type if_typename_to_iftype(const char *if_typename)
 {
 	int i;
 

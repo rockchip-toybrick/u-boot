@@ -148,6 +148,10 @@ enum {
 	CLK_CRYPTO_DIV_CON_SHIFT	= 6,
 	CLK_CRYPTO_DIV_CON_MASK		= GENMASK(7, 6),
 
+	/* CLKSEL33 */
+	PCLK_ALIVE_DIV_CON_SHIFT	= 8,
+	PCLK_ALIVE_DIV_CON_MASK		= 0x1f << PCLK_ALIVE_DIV_CON_SHIFT,
+
 	SOCSTS_DPLL_LOCK	= 1 << 5,
 	SOCSTS_APLL_LOCK	= 1 << 6,
 	SOCSTS_CPLL_LOCK	= 1 << 7,
@@ -540,13 +544,13 @@ static void rkclk_init(struct rk3288_cru *cru, struct rk3288_grf *grf)
 	 * set up dependent divisors for PCLK/HCLK and ACLK clocks.
 	 */
 	aclk_div = GPLL_HZ / PD_BUS_ACLK_HZ - 1;
-	assert((aclk_div + 1) * PD_BUS_ACLK_HZ == GPLL_HZ && aclk_div <= 0x1f);
+	assert((aclk_div + 1) * PD_BUS_ACLK_HZ <= GPLL_HZ && aclk_div <= 0x1f);
 	hclk_div = PD_BUS_ACLK_HZ / PD_BUS_HCLK_HZ - 1;
-	assert((hclk_div + 1) * PD_BUS_HCLK_HZ ==
+	assert((hclk_div + 1) * PD_BUS_HCLK_HZ <=
 		PD_BUS_ACLK_HZ && (hclk_div <= 0x3) && (hclk_div != 0x2));
 
 	pclk_div = PD_BUS_ACLK_HZ / PD_BUS_PCLK_HZ - 1;
-	assert((pclk_div + 1) * PD_BUS_PCLK_HZ ==
+	assert((pclk_div + 1) * PD_BUS_PCLK_HZ <=
 		PD_BUS_ACLK_HZ && pclk_div <= 0x7);
 
 	rk_clrsetreg(&cru->cru_clksel_con[1],
@@ -562,14 +566,14 @@ static void rkclk_init(struct rk3288_cru *cru, struct rk3288_grf *grf)
 	 * set up dependent divisors for PCLK/HCLK and ACLK clocks.
 	 */
 	aclk_div = GPLL_HZ / PERI_ACLK_HZ - 1;
-	assert((aclk_div + 1) * PERI_ACLK_HZ == GPLL_HZ && aclk_div <= 0x1f);
+	assert((aclk_div + 1) * PERI_ACLK_HZ <= GPLL_HZ && aclk_div <= 0x1f);
 
 	hclk_div = ilog2(PERI_ACLK_HZ / PERI_HCLK_HZ);
-	assert((1 << hclk_div) * PERI_HCLK_HZ ==
+	assert((1 << hclk_div) * PERI_HCLK_HZ <=
 		PERI_ACLK_HZ && (hclk_div <= 0x2));
 
 	pclk_div = ilog2(PERI_ACLK_HZ / PERI_PCLK_HZ);
-	assert((1 << pclk_div) * PERI_PCLK_HZ ==
+	assert((1 << pclk_div) * PERI_PCLK_HZ <=
 		PERI_ACLK_HZ && (pclk_div <= 0x3));
 
 	rk_clrsetreg(&cru->cru_clksel_con[10],
@@ -865,6 +869,17 @@ static ulong rockchip_crypto_set_clk(struct rk3288_cru *cru,
 
 	return rockchip_crypto_get_clk(cru, gclk_rate);
 }
+
+static ulong rk3288_alive_get_clk(struct rk3288_cru *cru, uint gclk_rate)
+{
+	u32 div, con, parent;
+
+	con = readl(&cru->cru_clksel_con[33]);
+	div = (con & PCLK_ALIVE_DIV_CON_MASK) >>
+	      PCLK_ALIVE_DIV_CON_SHIFT;
+	parent = gclk_rate;
+	return DIV_TO_RATE(parent, div);
+}
 #endif
 
 static ulong rk3288_clk_get_rate(struct clk *clk)
@@ -913,6 +928,9 @@ static ulong rk3288_clk_get_rate(struct clk *clk)
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_CRYPTO:
 		new_rate = rockchip_crypto_get_clk(priv->cru, gclk_rate);
+		break;
+	case PCLK_WDT:
+		new_rate = rk3288_alive_get_clk(priv->cru, gclk_rate);
 		break;
 #endif
 	default:

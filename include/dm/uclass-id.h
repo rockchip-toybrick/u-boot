@@ -31,6 +31,7 @@ enum uclass_id {
 	UCLASS_BLK,		/* Block device */
 	UCLASS_CLK,		/* Clock source, e.g. used by peripherals */
 	UCLASS_CPU,		/* CPU, typically part of an SoC */
+	UCLASS_AMP,		/* Asymmetric Multi-Processing */
 	UCLASS_CODEC,		/* audio codec */
 	UCLASS_CROS_EC,		/* Chrome OS EC */
 	UCLASS_DISPLAY,		/* Display (e.g. DisplayPort, HDMI) */
@@ -100,7 +101,7 @@ enum uclass_id {
 	UCLASS_CHARGE_DISPLAY,	/* Charge display */
 	UCLASS_DVFS,		/* DVFS policy */
 	UCLASS_IO_DOMAIN,	/* IO domain */
-	UCLASS_RKCRYPTO,        /* Rockchip Crypto */
+	UCLASS_CRYPTO,		/* Crypto */
 	UCLASS_COUNT,
 	UCLASS_INVALID = -1,
 };

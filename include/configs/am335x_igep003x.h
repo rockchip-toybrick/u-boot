@@ -22,10 +22,6 @@
 
 #define CONFIG_ENV_SIZE			(96 << 10)	/*  96 KiB */
 
-/* Make the verbose messages from UBI stop printing */
-#define CONFIG_UBI_SILENCE_MSG
-#define CONFIG_UBIFS_SILENCE_MSG
-
 #define CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG
 
 #ifndef CONFIG_SPL_BUILD
@@ -113,14 +109,7 @@
 #define CONFIG_PHY_SMSC
 
 /* NAND support */
-#define CONFIG_NAND_OMAP_ELM
 #define CONFIG_SYS_NAND_ONFI_DETECTION	1
-
-#define CONFIG_MTD_PARTITIONS
-#define CONFIG_MTD_DEVICE
-
-#define MTDIDS_DEFAULT			"nand0=omap2-nand.0"
-#define MTDPARTS_DEFAULT		"mtdparts=omap2-nand.0:512k(SPL),-(UBI)"
 
 /* SPL */
 

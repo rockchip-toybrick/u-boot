@@ -158,8 +158,6 @@
 #define CONFIG_ENV_SIZE			CONFIG_ENV_SECT_SIZE
 #endif
 
-#define CONFIG_NAND_MXS
-
 /* NAND stuff */
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE		0x40000000
@@ -168,20 +166,8 @@
 #define CONFIG_SYS_NAND_MX7_GPMI_62_ECC_BYTES
 
 /* Dynamic MTD partition support */
-#define CONFIG_MTD_PARTITIONS
-#define CONFIG_MTD_DEVICE	/* needed for mtdparts commands */
-#define MTDIDS_DEFAULT		"nand0=gpmi-nand"
-#define MTDPARTS_DEFAULT	"mtdparts=gpmi-nand:"		\
-				"512k(mx7-bcb),"		\
-				"1536k(u-boot1)ro,"		\
-				"1536k(u-boot2)ro,"		\
-				"512k(u-boot-env),"		\
-				"-(ubi)"
 
 /* DMA stuff, needed for GPMI/MXS NAND support */
-#define CONFIG_APBH_DMA
-#define CONFIG_APBH_DMA_BURST
-#define CONFIG_APBH_DMA_BURST8
 
 /* USB Configs */
 #define CONFIG_EHCI_HCD_INIT_AFTER_RESET

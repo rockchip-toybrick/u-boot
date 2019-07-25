@@ -21,7 +21,11 @@
 #include <linux/compat.h>
 #include <mtd/mtd-abi.h>
 #include <linux/errno.h>
+#include <linux/list.h>
 #include <div64.h>
+#if IS_ENABLED(CONFIG_DM)
+#include <dm/device.h>
+#endif
 
 #define MAX_MTD_DEVICES 32
 #endif
@@ -103,6 +107,36 @@ struct mtd_oob_ops {
 #else
 #define MTD_MAX_ECCPOS_ENTRIES_LARGE	680
 #endif
+/**
+ * struct mtd_oob_region - oob region definition
+ * @offset: region offset
+ * @length: region length
+ *
+ * This structure describes a region of the OOB area, and is used
+ * to retrieve ECC or free bytes sections.
+ * Each section is defined by an offset within the OOB area and a
+ * length.
+ */
+struct mtd_oob_region {
+	u32 offset;
+	u32 length;
+};
+
+/*
+ * struct mtd_ooblayout_ops - NAND OOB layout operations
+ * @ecc: function returning an ECC region in the OOB area.
+ *	 Should return -ERANGE if %section exceeds the total number of
+ *	 ECC sections.
+ * @free: function returning a free region in the OOB area.
+ *	  Should return -ERANGE if %section exceeds the total number of
+ *	  free sections.
+ */
+struct mtd_ooblayout_ops {
+	int (*ecc)(struct mtd_info *mtd, int section,
+		   struct mtd_oob_region *oobecc);
+	int (*free)(struct mtd_info *mtd, int section,
+		    struct mtd_oob_region *oobfree);
+};
 
 /*
  * Internal ECC layout control structure. For historical reasons, there is a
@@ -178,6 +212,9 @@ struct mtd_info {
 	char *name;
 #endif
 	int index;
+
+	/* OOB layout description */
+	const struct mtd_ooblayout_ops *ooblayout;
 
 	/* ECC layout structure pointer - read only! */
 	struct nand_ecclayout *ecclayout;
@@ -276,7 +313,89 @@ struct mtd_info {
 	struct udevice *dev;
 #endif
 	int usecount;
+
+	/* MTD devices do not have any parent. MTD partitions do. */
+	struct mtd_info *parent;
+
+	/*
+	 * Offset of the partition relatively to the parent offset.
+	 * Is 0 for real MTD devices (ie. not partitions).
+	 */
+	u64 offset;
+
+	/*
+	 * List node used to add an MTD partition to the parent
+	 * partition list.
+	 */
+	struct list_head node;
+
+	/*
+	 * List of partitions attached to this MTD device (the parent
+	 * MTD device can itself be a partition).
+	 */
+	struct list_head partitions;
 };
+
+#if IS_ENABLED(CONFIG_DM)
+static inline void mtd_set_of_node(struct mtd_info *mtd,
+				   const struct device_node *np)
+{
+	mtd->dev->node.np = np;
+}
+
+static inline const struct device_node *mtd_get_of_node(struct mtd_info *mtd)
+{
+	return mtd->dev->node.np;
+}
+#else
+struct device_node;
+
+static inline void mtd_set_of_node(struct mtd_info *mtd,
+				   const struct device_node *np)
+{
+}
+
+static inline const struct device_node *mtd_get_of_node(struct mtd_info *mtd)
+{
+	return NULL;
+}
+#endif
+
+static inline bool mtd_is_partition(const struct mtd_info *mtd)
+{
+	return mtd->parent;
+}
+
+static inline bool mtd_has_partitions(const struct mtd_info *mtd)
+{
+	return !list_empty(&mtd->partitions);
+}
+
+bool mtd_partitions_used(struct mtd_info *master);
+
+int mtd_ooblayout_ecc(struct mtd_info *mtd, int section,
+		      struct mtd_oob_region *oobecc);
+int mtd_ooblayout_find_eccregion(struct mtd_info *mtd, int eccbyte,
+				 int *section,
+				 struct mtd_oob_region *oobregion);
+int mtd_ooblayout_get_eccbytes(struct mtd_info *mtd, u8 *eccbuf,
+			       const u8 *oobbuf, int start, int nbytes);
+int mtd_ooblayout_set_eccbytes(struct mtd_info *mtd, const u8 *eccbuf,
+			       u8 *oobbuf, int start, int nbytes);
+int mtd_ooblayout_free(struct mtd_info *mtd, int section,
+		       struct mtd_oob_region *oobfree);
+int mtd_ooblayout_get_databytes(struct mtd_info *mtd, u8 *databuf,
+				const u8 *oobbuf, int start, int nbytes);
+int mtd_ooblayout_set_databytes(struct mtd_info *mtd, const u8 *databuf,
+				u8 *oobbuf, int start, int nbytes);
+int mtd_ooblayout_count_freebytes(struct mtd_info *mtd);
+int mtd_ooblayout_count_eccbytes(struct mtd_info *mtd);
+
+static inline void mtd_set_ooblayout(struct mtd_info *mtd,
+				     const struct mtd_ooblayout_ops *ooblayout)
+{
+	mtd->ooblayout = ooblayout;
+}
 
 static inline int mtd_oobavail(struct mtd_info *mtd, struct mtd_oob_ops *ops)
 {
@@ -299,17 +418,7 @@ int mtd_panic_write(struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen,
 		    const u_char *buf);
 
 int mtd_read_oob(struct mtd_info *mtd, loff_t from, struct mtd_oob_ops *ops);
-
-static inline int mtd_write_oob(struct mtd_info *mtd, loff_t to,
-				struct mtd_oob_ops *ops)
-{
-	ops->retlen = ops->oobretlen = 0;
-	if (!mtd->_write_oob)
-		return -EOPNOTSUPP;
-	if (!(mtd->flags & MTD_WRITEABLE))
-		return -EROFS;
-	return mtd->_write_oob(mtd, to, ops);
-}
+int mtd_write_oob(struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops);
 
 int mtd_get_fact_prot_info(struct mtd_info *mtd, size_t len, size_t *retlen,
 			   struct otp_info *buf);
@@ -484,8 +593,29 @@ unsigned mtd_mmap_capabilities(struct mtd_info *mtd);
 /* drivers/mtd/mtdcore.h */
 int add_mtd_device(struct mtd_info *mtd);
 int del_mtd_device(struct mtd_info *mtd);
+
+#ifdef CONFIG_MTD_PARTITIONS
 int add_mtd_partitions(struct mtd_info *, const struct mtd_partition *, int);
 int del_mtd_partitions(struct mtd_info *);
+#else
+static inline int add_mtd_partitions(struct mtd_info *mtd,
+				     const struct mtd_partition *parts,
+				     int nparts)
+{
+	return 0;
+}
+
+static inline int del_mtd_partitions(struct mtd_info *mtd)
+{
+	return 0;
+}
+#endif
+
+struct mtd_info *__mtd_next_device(int i);
+#define mtd_for_each_device(mtd)			\
+	for ((mtd) = __mtd_next_device(0);		\
+	     (mtd) != NULL;				\
+	     (mtd) = __mtd_next_device(mtd->index + 1))
 
 int mtd_arg_off(const char *arg, int *idx, loff_t *off, loff_t *size,
 		loff_t *maxsize, int devtype, uint64_t chipsize);
@@ -497,5 +627,11 @@ int mtd_arg_off_size(int argc, char *const argv[], int *idx, loff_t *off,
 void mtd_get_len_incl_bad(struct mtd_info *mtd, uint64_t offset,
 			  const uint64_t length, uint64_t *len_incl_bad,
 			  int *truncated);
+bool mtd_dev_list_updated(void);
+
+/* drivers/mtd/mtd_uboot.c */
+int mtd_search_alternate_name(const char *mtdname, char *altname,
+			      unsigned int max_len);
+
 #endif
 #endif /* __MTD_MTD_H__ */

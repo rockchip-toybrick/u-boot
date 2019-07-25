@@ -33,6 +33,11 @@
 
 #define CONFIG_REVISION_TAG		1
 #define CONFIG_ENV_OVERWRITE
+/* NAND: SPL falcon mode configs */
+#if defined(CONFIG_SPL_OS_BOOT)
+#define CONFIG_SYS_NAND_SPL_KERNEL_OFFS 0x2a0000
+#endif /* CONFIG_SPL_OS_BOOT */
+#endif /* CONFIG_NAND */
 
 /* Status LED */
 
@@ -69,7 +74,6 @@
 /*
  * Board NAND Info.
  */
-#define CONFIG_NAND_OMAP_GPMC
 #define CONFIG_SYS_MAX_NAND_DEVICE	1		/* Max number of NAND */
 							/* devices */
 
@@ -247,7 +251,6 @@
 /* Defines for SPL */
 
 /* NAND boot config */
-#define CONFIG_SYS_NAND_BUSWIDTH_16BIT
 #define CONFIG_SYS_NAND_5_ADDR_CYCLE
 #define CONFIG_SYS_NAND_PAGE_COUNT	64
 #define CONFIG_SYS_NAND_PAGE_SIZE	2048

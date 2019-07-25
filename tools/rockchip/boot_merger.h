@@ -186,7 +186,9 @@ typedef struct {
 #define OPT_UNPACK          "--unpack"
 #define OPT_SUBFIX          "--subfix"
 #define OPT_REPLACE         "--replace"
+#define OPT_PREPATH         "--prepath"
 #define OPT_SIZE	    "--size"
+#define OPT_RC4		    "--rc4"
 
 #define OPT_CHIP	"-c"
 #define OPT_471		"-1"

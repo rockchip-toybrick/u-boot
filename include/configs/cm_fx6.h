@@ -48,8 +48,6 @@
 
 /* MTD support */
 #ifndef CONFIG_SPL_BUILD
-#define CONFIG_MTD_DEVICE
-#define CONFIG_MTD_PARTITIONS
 #define CONFIG_SPI_FLASH_MTD
 #endif
 
@@ -175,12 +173,8 @@
 #define CONFIG_SYS_NAND_BASE		0x40000000
 #define CONFIG_SYS_NAND_MAX_CHIPS	1
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
-#define CONFIG_NAND_MXS
 #define CONFIG_SYS_NAND_ONFI_DETECTION
 /* APBH DMA is required for NAND support */
-#define CONFIG_APBH_DMA
-#define CONFIG_APBH_DMA_BURST
-#define CONFIG_APBH_DMA_BURST8
 #endif
 
 /* Ethernet */

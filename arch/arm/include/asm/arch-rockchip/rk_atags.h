@@ -33,6 +33,7 @@
 #endif
 
 /* tag_bootdev.devtype */
+#define BOOT_TYPE_UNKNOWN	0
 #define BOOT_TYPE_NAND		(1 << 0)
 #define BOOT_TYPE_EMMC		(1 << 1)
 #define BOOT_TYPE_SD0		(1 << 2)
@@ -40,6 +41,10 @@
 #define BOOT_TYPE_SPI_NOR	(1 << 4)
 #define BOOT_TYPE_SPI_NAND	(1 << 5)
 #define BOOT_TYPE_RAM		(1 << 6)
+
+/* define sd card function */
+#define SD_UNKNOWN_CARD		0
+#define SD_UPDATE_CARD		1
 
 /* tag_serial.m_mode */
 #define SERIAL_M_MODE_M0	0x0
@@ -67,7 +72,8 @@ struct tag_bootdev {
 	u32 devtype;
 	u32 devnum;
 	u32 mode;
-	u32 reserved[7];
+	u32 sdupdate;
+	u32 reserved[6];
 	u32 hash;
 } __packed;
 
@@ -202,6 +208,26 @@ struct tag *atags_get_tag(u32 magic);
  * return: 0 is not available, otherwise available.
  */
 int atags_is_available(void);
+
+#ifdef CONFIG_SPL_BUILD
+/*
+ * get_bootdev_by_brom_bootsource
+ *
+ * @magic: void
+ *
+ * return: boootdev, else 0 fail.
+ */
+int get_bootdev_by_brom_bootsource(void);
+
+/*
+ * atags_set_bootdev_by_brom_bootsource
+ *
+ * @magic: void
+ *
+ * return: 0 success, others fail.
+ */
+int atags_set_bootdev_by_brom_bootsource(void);
+#endif
 
 /* Print only one tag */
 void atags_print_tag(struct tag *t);

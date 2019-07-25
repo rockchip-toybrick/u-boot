@@ -693,6 +693,8 @@ int boot_get_fdt(int flag, int argc, char * const argv[], uint8_t arch,
 void boot_fdt_add_mem_rsv_regions(struct lmb *lmb, void *fdt_blob);
 #ifdef CONFIG_SYSMEM
 int boot_fdt_add_sysmem_rsv_regions(void *fdt_blob);
+#else
+static inline int boot_fdt_add_sysmem_rsv_regions(void *fdt_blob) { return 0; }
 #endif
 int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size);
 
@@ -1271,6 +1273,20 @@ u32 android_image_get_comp(const struct andr_img_hdr *hdr);
 ulong android_image_get_end(const struct andr_img_hdr *hdr);
 ulong android_image_get_kload(const struct andr_img_hdr *hdr);
 void android_print_contents(const struct andr_img_hdr *hdr);
+
+/** android_image_load_separate - Load an Android Image separate from storage or ram
+ *
+ * Load an Android Image based on the header size in the storage or ram.
+ *
+ * @hdr:		The android image header
+ * @part:		The partition where to read the image from
+ * @load_address:	The address where the image will be loaded
+ * @ram_src:		The ram source to load, if NULL load from partition
+ * @return the blk count.
+ */
+int android_image_load_separate(struct andr_img_hdr *hdr,
+				const disk_partition_t *part,
+				void *load_address, void *ram_src);
 
 /** android_image_load - Load an Android Image from storage.
  *

@@ -20,7 +20,7 @@
 
 #define CONFIG_SYS_NS16550_MEM32
 
-#define CONFIG_NR_DRAM_BANKS		4
+#define CONFIG_NR_DRAM_BANKS		12
 
 #ifndef CONFIG_SPL_BUILD
 #include <config_distro_defaults.h>
@@ -115,6 +115,8 @@
 		"setenv devtype mmc; setenv devnum 1; echo Boot from SDcard;" \
 	"elif mmc dev 0; then " \
 		"setenv devtype mmc; setenv devnum 0;" \
+	"elif mtd_blk dev 0; then " \
+		"setenv devtype mtd; setenv devnum 0;" \
 	"elif rknand dev 0; then " \
 		"setenv devtype rknand; setenv devnum 0;" \
 	"elif rksfc dev 0; then " \
@@ -124,12 +126,24 @@
 	"fi; \0"
 
 #ifdef CONFIG_AVB_VBMETA_PUBLIC_KEY_VALIDATE
+#ifndef CONFIG_ANDROID_AB
 #define RKIMG_BOOTCOMMAND \
 	"boot_android ${devtype} ${devnum};" \
 	"echo AVB boot failed and enter rockusb or fastboot!;" \
 	"rockusb 0 ${devtype} ${devnum};" \
 	"fastboot usb 0;"
 #else
+/*
+ * Update images a/b and active slot with fastboot
+ * when avb+ab system boot failed.
+ * Remove rockusb since it unable to active slot.
+ */
+#define RKIMG_BOOTCOMMAND \
+	"boot_android ${devtype} ${devnum};" \
+	"echo AVB boot failed and enter fastboot!;" \
+	"fastboot usb 0;"
+#endif /* CONFIG_ANDROID_AB */
+#else /* CONFIG_AVB_VBMETA_PUBLIC_KEY_VALIDATE */
 #define RKIMG_BOOTCOMMAND \
 	"boot_android ${devtype} ${devnum};" \
 	"bootrkp;" \

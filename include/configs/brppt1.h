@@ -52,9 +52,6 @@
  * both for ease of use in U-Boot and for passing information on to
  * the Linux kernel.
  */
-#if defined(CONFIG_SPI_BOOT) || defined(CONFIG_NAND)
-#define CONFIG_MTD_DEVICE		/* Required for mtdparts */
-#endif /* CONFIG_SPI_BOOT, ... */
 
 #ifdef CONFIG_SPL_OS_BOOT
 #define CONFIG_SYS_SPL_ARGS_ADDR		0x80F80000
@@ -71,7 +68,6 @@
 #endif /* CONFIG_SPL_OS_BOOT */
 
 #ifdef CONFIG_NAND
-#define CONFIG_SPL_NAND_AM33XX_BCH	/* OMAP4 and later ELM support */
 #define CONFIG_SPL_NAND_BASE
 #define CONFIG_SPL_NAND_DRIVERS
 #define CONFIG_SPL_NAND_ECC
@@ -184,9 +180,7 @@ MMCARGS
  */
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE		0x8000000
-#define CONFIG_NAND_OMAP_GPMC
 /* don't change OMAP_ELM, ECCSCHEME. ROM code only supports this */
-#define CONFIG_NAND_OMAP_ELM
 #define CONFIG_NAND_OMAP_ECCSCHEME	OMAP_ECC_BCH8_CODE_HW
 #define CONFIG_SYS_NAND_5_ADDR_CYCLE
 #define CONFIG_SYS_NAND_BLOCK_SIZE	(128*1024)
@@ -233,7 +227,6 @@ MMCARGS
 
 #if defined(CONFIG_SPI_BOOT)
 /* McSPI IP block */
-#define CONFIG_SPI
 #define CONFIG_SF_DEFAULT_SPEED		24000000
 
 #define CONFIG_SPL_SPI_LOAD

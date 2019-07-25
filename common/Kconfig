@@ -233,7 +233,8 @@ config CONSOLE_RECORD
 config CONSOLE_RECORD_OUT_SIZE
 	hex "Output buffer size"
 	depends on CONSOLE_RECORD
-	default 0x400 if CONSOLE_RECORD
+	default 0x400 if CONSOLE_RECORD && !ARCH_ROCKCHIP
+	default 0x2000 if CONSOLE_RECORD && ARCH_ROCKCHIP
 	help
 	  Set the size of the console output buffer. When this fills up, no
 	  more data will be recorded until some is removed. The buffer is
@@ -248,6 +249,16 @@ config CONSOLE_RECORD_IN_SIZE
 	  tstc() and getc() will use this in preference to real device input.
 	  The buffer is allocated immediately after the malloc() region is
 	  ready.
+
+config CONSOLE_DISABLE_CTRLC
+	bool "disable ctrlc"
+	help
+	  This disable ctrl+c when CONFIG_BOOTDELAY is 0.
+
+config DISABLE_CONSOLE
+	bool "disable console in & out"
+	help
+	 This disable console in & out.
 
 config IDENT_STRING
 	string "Board specific string to be added to uboot version string"

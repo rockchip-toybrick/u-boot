@@ -64,7 +64,6 @@
 /*
  * SSP/SPI
  */
-#define CONFIG_LPC32XX_SSP
 #define CONFIG_LPC32XX_SSP_TIMEOUT	100000
 
 /*
@@ -88,7 +87,6 @@
 /*
  * NAND controller
  */
-#define CONFIG_NAND_LPC32XX_SLC
 #define CONFIG_SYS_NAND_BASE		SLC_NAND_BASE
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE_LIST	{ CONFIG_SYS_NAND_BASE }
@@ -179,7 +177,6 @@
 /* SPL will use serial */
 
 /* SPL loads an image from NAND */
-#define CONFIG_SPL_NAND_SIMPLE
 #define CONFIG_SPL_NAND_RAW_ONLY
 #define CONFIG_SPL_NAND_DRIVERS
 

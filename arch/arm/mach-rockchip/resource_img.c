@@ -5,10 +5,12 @@
  */
 #include <common.h>
 #include <adc.h>
+#include <bmp_layout.h>
 #include <asm/io.h>
 #include <fs.h>
 #include <malloc.h>
 #include <sysmem.h>
+#include <asm/unaligned.h>
 #include <linux/list.h>
 #include <asm/arch/resource_img.h>
 #include <boot_rkimg.h>
@@ -165,6 +167,7 @@ static int init_resource_list(struct resource_img_hdr *hdr)
 	int offset = 0;
 	int resource_found = 0;
 	struct blk_desc *dev_desc;
+	struct bmp_header *header;
 	disk_partition_t part_info;
 	char *boot_partname = PART_BOOT;
 
@@ -246,6 +249,14 @@ static int init_resource_list(struct resource_img_hdr *hdr)
 	}
 	ret = android_image_check_header(andr_hdr);
 	if (!ret) {
+		u32 os_ver = andr_hdr->os_version >> 11;
+		u32 os_lvl = andr_hdr->os_version & ((1U << 11) - 1);
+
+		if (os_ver)
+			printf("Android %u.%u, Build %u.%u\n",
+			       (os_ver >> 14) & 0x7F, (os_ver >> 7) & 0x7F,
+			       (os_lvl >> 4) + 2000, os_lvl & 0x0F);
+
 		debug("%s: Load resource from %s second pos\n",
 		      __func__, part_info.name);
 		/* Read resource from second offset */
@@ -317,6 +328,65 @@ next:
 
 	ret = 0;
 	printf("Load FDT from %s part\n", boot_partname);
+
+	/*
+	 * Add logo.bmp from "logo" parititon
+	 *
+	 * We provide a "logo" partition for user to store logo.bmp
+	 * and update from kernel user space dynamically.
+	 */
+	if (part_get_info_by_name(dev_desc, PART_LOGO, &part_info) >= 0) {
+		struct resource_file *file;
+		struct list_head *node;
+
+		header = memalign(ARCH_DMA_MINALIGN, RK_BLK_SIZE);
+		if (!header) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
+		ret = blk_dread(dev_desc, part_info.start, 1, header);
+		if (ret != 1) {
+			ret = -EIO;
+			goto err2;
+		}
+
+		if (header->signature[0] != 'B' ||
+		    header->signature[1] != 'M') {
+			ret = 0;
+			goto err2;
+		}
+
+		entry = malloc(sizeof(*entry));
+		if (!entry) {
+			ret = -ENOMEM;
+			goto err2;
+		}
+
+		memcpy(entry->tag, ENTRY_TAG, sizeof(ENTRY_TAG));
+		memcpy(entry->name, "logo.bmp", sizeof("logo.bmp"));
+		entry->f_size = get_unaligned_le32(&header->file_size);
+		entry->f_offset = 0;
+
+		/* Delete exist "logo.bmp", then add new */
+		list_for_each(node, &entrys_head) {
+			file = list_entry(node,
+					  struct resource_file, link);
+			if (!strcmp(file->name, entry->name)) {
+				list_del(&file->link);
+				free(file);
+				break;
+			}
+		}
+
+		add_file_to_list(entry, part_info.start);
+		free(entry);
+		printf("Load \"logo.bmp\" from logo part\n");
+		ret = 0;
+err2:
+		free(header);
+	}
+
 err:
 	free(content);
 out:
@@ -414,6 +484,7 @@ int rockchip_read_resource_file(void *buf, const char *name,
 #define KEY_WORDS_ADC_CTRL	"#_"
 #define KEY_WORDS_ADC_CH	"_ch"
 #define KEY_WORDS_GPIO		"#gpio"
+#define GPIO_SWPORT_DDR		0x04
 #define GPIO_EXT_PORT		0x50
 #define MAX_ADC_CH_NR		10
 #define MAX_GPIO_NR		10
@@ -518,7 +589,8 @@ static int gpio_parse_base_address(fdt_addr_t *gpio_base_addr)
 {
 	static int initial;
 	ofnode parent, node;
-	int i = 0;
+	const char *name;
+	int idx, nr = 0;
 
 	if (initial)
 		return 0;
@@ -535,11 +607,19 @@ static int gpio_parse_base_address(fdt_addr_t *gpio_base_addr)
 			continue;
 		}
 
-		gpio_base_addr[i++] = ofnode_get_addr(node);
-		debug("   - gpio%d: 0x%x\n", i - 1, (uint32_t)gpio_base_addr[i - 1]);
+		name = ofnode_get_name(node);
+		if (!is_digit((char)*(name + 4))) {
+			debug("   - bad gpio node name: %s\n", name);
+			continue;
+		}
+
+		nr++;
+		idx = *(name + 4) - '0';
+		gpio_base_addr[idx] = ofnode_get_addr(node);
+		debug("   - gpio%d: 0x%x\n", idx, (uint32_t)gpio_base_addr[idx]);
 	}
 
-	if (i == 0) {
+	if (nr == 0) {
 		debug("   - parse gpio address failed\n");
 		return -EINVAL;
 	}
@@ -574,6 +654,14 @@ static int rockchip_read_dtb_by_gpio(const char *file_name)
 
 	debug("%s\n", file_name);
 
+	/* Parse gpio address */
+	memset(gpio_base_addr, 0, sizeof(gpio_base_addr));
+	ret = gpio_parse_base_address(gpio_base_addr);
+	if (ret) {
+		debug("   - Can't parse gpio base address: %d\n", ret);
+		return ret;
+	}
+
 	strgpio = strstr(file_name, KEY_WORDS_GPIO);
 	while (strgpio) {
 		debug("   - substr: %s\n", strgpio);
@@ -588,13 +676,6 @@ static int rockchip_read_dtb_by_gpio(const char *file_name)
 			return -EINVAL;
 		}
 
-		/* Parse gpio address */
-		ret = gpio_parse_base_address(gpio_base_addr);
-		if (ret) {
-			debug("   - Can't parse gpio base address: %d\n", ret);
-			return ret;
-		}
-
 		/* Read gpio value */
 		port = *(p + 0) - '0';
 		bank = *(p + 1) - 'a';
@@ -606,9 +687,20 @@ static int rockchip_read_dtb_by_gpio(const char *file_name)
 		 * is enough. We use cached_v[] to save what we have read, zero
 		 * means not read before.
 		 */
-		if (cached_v[port] == 0)
+		if (cached_v[port] == 0) {
+			if (!gpio_base_addr[port]) {
+				debug("   - can't find gpio%d base address\n", port);
+				return 0;
+			}
+
+			/* Input mode */
+			val = readl(gpio_base_addr[port] + GPIO_SWPORT_DDR);
+			val &= ~(1 << (bank * 8 + pin));
+			writel(val, gpio_base_addr[port] + GPIO_SWPORT_DDR);
+
 			cached_v[port] =
 				readl(gpio_base_addr[port] + GPIO_EXT_PORT);
+		}
 
 		/* Verify result */
 		bit = bank * 8 + pin;
@@ -623,7 +715,7 @@ static int rockchip_read_dtb_by_gpio(const char *file_name)
 		}
 
 		debug("   - parse: gpio%d%c%d=%d, read=%d %s\n",
-		      port, bank + 'a', pin, lvl, val, found ? "(Y)" : "");
+		      port, bank + 'a', pin, lvl, val, found ? "(Y)" : "(N)");
 	}
 
 	return found ? 0 : -ENOENT;
@@ -720,7 +812,7 @@ int rockchip_read_dtb_file(void *fdt_addr)
 	if (size < 0)
 		return size;
 
-	if (!sysmem_alloc_base("fdt", (phys_addr_t)fdt_addr,
+	if (!sysmem_alloc_base(MEMBLK_ID_FDT, (phys_addr_t)fdt_addr,
 			       ALIGN(size, RK_BLK_SIZE) + CONFIG_SYS_FDT_PAD))
 		return -ENOMEM;
 

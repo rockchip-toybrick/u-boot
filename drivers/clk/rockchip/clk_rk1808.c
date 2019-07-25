@@ -564,6 +564,124 @@ static ulong rk1808_vop_set_clk(struct rk1808_clk_priv *priv,
 
 	return rk1808_vop_get_clk(priv, clk_id);
 }
+
+static ulong rk1808_mac_set_clk(struct clk *clk, uint hz)
+{
+	struct rk1808_clk_priv *priv = dev_get_priv(clk->dev);
+	struct rk1808_cru *cru = priv->cru;
+	u32 con = readl(&cru->clksel_con[26]);
+	ulong pll_rate;
+	u8 div;
+
+	if ((con >> GMAC_PLL_SEL_SHIFT) & GMAC_PLL_SEL_NPLL)
+		pll_rate = rockchip_pll_get_rate(&rk1808_pll_clks[NPLL],
+						 priv->cru, NPLL);
+	else if ((con >> GMAC_PLL_SEL_SHIFT) & GMAC_PLL_SEL_PPLL)
+		pll_rate = rockchip_pll_get_rate(&rk1808_pll_clks[PPLL],
+						 priv->cru, PPLL);
+	else
+		pll_rate = rockchip_pll_get_rate(&rk1808_pll_clks[CPLL],
+						 priv->cru, CPLL);
+
+	/*default set 50MHZ for gmac*/
+	if (!hz)
+		hz = 50000000;
+
+	div = DIV_ROUND_UP(pll_rate, hz) - 1;
+	assert(div < 32);
+	rk_clrsetreg(&cru->clksel_con[26], CLK_GMAC_DIV_MASK,
+		     div << CLK_GMAC_DIV_SHIFT);
+
+	return DIV_TO_RATE(pll_rate, div);
+}
+
+static int rk1808_mac_set_speed_clk(struct clk *clk, ulong clk_id, uint hz)
+{
+	struct rk1808_clk_priv *priv = dev_get_priv(clk->dev);
+	struct rk1808_cru *cru = priv->cru;
+	u32 sel;
+
+	switch (clk_id) {
+	case SCLK_GMAC_RGMII_SPEED:
+		if (hz == 125000000)
+			sel = 0;
+		else if (hz == 2500000)
+			sel = 2;
+		else
+			sel = 3;
+		rk_clrsetreg(&cru->clksel_con[27], RGMII_CLK_SEL_MASK,
+			     sel << RGMII_CLK_SEL_SHIFT);
+		break;
+	case SCLK_GMAC_RMII_SPEED:
+		if (hz == 2500000)
+			sel = 0;
+		else
+			sel = 1;
+		rk_clrsetreg(&cru->clksel_con[27], RMII_CLK_SEL_MASK,
+			     sel << RMII_CLK_SEL_SHIFT);
+		break;
+	default:
+		return -ENOENT;
+	}
+	return 0;
+}
+
+static ulong rk1808_crypto_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
+{
+	struct rk1808_cru *cru = priv->cru;
+	u32 div, con, parent;
+
+	switch (clk_id) {
+	case SCLK_CRYPTO:
+		con = readl(&cru->clksel_con[29]);
+		div = (con & CRYPTO_DIV_MASK) >> CRYPTO_DIV_SHIFT;
+		parent = priv->gpll_hz;
+		break;
+	case SCLK_CRYPTO_APK:
+		con = readl(&cru->clksel_con[29]);
+		div = (con & CRYPTO_APK_DIV_MASK) >> CRYPTO_APK_DIV_SHIFT;
+		parent = priv->gpll_hz;
+		break;
+	default:
+		return -ENOENT;
+	}
+
+	return DIV_TO_RATE(parent, div);
+}
+
+static ulong rk1808_crypto_set_clk(struct rk1808_clk_priv *priv, ulong clk_id,
+				   ulong hz)
+{
+	struct rk1808_cru *cru = priv->cru;
+	int src_clk_div;
+
+	src_clk_div = DIV_ROUND_UP(priv->gpll_hz, hz);
+	assert(src_clk_div - 1 <= 31);
+
+	/*
+	 * select gpll as crypto clock source and
+	 * set up dependent divisors for crypto clocks.
+	 */
+	switch (clk_id) {
+	case SCLK_CRYPTO:
+		rk_clrsetreg(&cru->clksel_con[29],
+			     CRYPTO_PLL_SEL_MASK | CRYPTO_DIV_MASK,
+			     CRYPTO_PLL_SEL_GPLL << CRYPTO_PLL_SEL_SHIFT |
+			     (src_clk_div - 1) << CRYPTO_DIV_SHIFT);
+		break;
+	case SCLK_CRYPTO_APK:
+		rk_clrsetreg(&cru->clksel_con[29],
+			     CRYPTO_APK_PLL_SEL_MASK | CRYPTO_APK_DIV_MASK,
+			     CRYPTO_PLL_SEL_GPLL << CRYPTO_APK_SEL_SHIFT |
+			     (src_clk_div - 1) << CRYPTO_APK_DIV_SHIFT);
+		break;
+	default:
+		printf("do not support this peri freq\n");
+		return -EINVAL;
+	}
+
+	return rk1808_crypto_get_clk(priv, clk_id);
+}
 #endif
 
 static ulong rk1808_bus_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
@@ -583,6 +701,7 @@ static ulong rk1808_bus_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
 		parent = priv->gpll_hz;
 		break;
 	case LSCLK_BUS_PRE:
+	case PCLK_WDT:
 		con = readl(&cru->clksel_con[28]);
 		div = (con & LSCLK_BUS_DIV_CON_MASK) >> LSCLK_BUS_DIV_CON_SHIFT;
 		parent = priv->gpll_hz;
@@ -818,10 +937,15 @@ static ulong rk1808_clk_get_rate(struct clk *clk)
 	case DCLK_VOPLITE:
 		rate = rk1808_vop_get_clk(priv, clk->id);
 		break;
+	case SCLK_CRYPTO:
+	case SCLK_CRYPTO_APK:
+		rate = rk1808_crypto_get_clk(priv, clk->id);
+		break;
 #endif
 	case HSCLK_BUS_PRE:
 	case MSCLK_BUS_PRE:
 	case LSCLK_BUS_PRE:
+	case PCLK_WDT:
 		rate = rk1808_bus_get_clk(priv, clk->id);
 		break;
 	case MSCLK_PERI:
@@ -914,6 +1038,18 @@ static ulong rk1808_clk_set_rate(struct clk *clk, ulong rate)
 	case DCLK_VOPLITE:
 		ret = rk1808_vop_set_clk(priv, clk->id, rate);
 		break;
+	case SCLK_GMAC:
+	case SCLK_GMAC_SRC:
+		ret = rk1808_mac_set_clk(clk, rate);
+		break;
+	case SCLK_GMAC_RMII_SPEED:
+	case SCLK_GMAC_RGMII_SPEED:
+		ret = rk1808_mac_set_speed_clk(clk, clk->id, rate);
+		break;
+	case SCLK_CRYPTO:
+	case SCLK_CRYPTO_APK:
+		ret = rk1808_crypto_set_clk(priv, clk->id, rate);
+		break;
 #endif
 	case HSCLK_BUS_PRE:
 	case MSCLK_BUS_PRE:
@@ -924,6 +1060,8 @@ static ulong rk1808_clk_set_rate(struct clk *clk, ulong rate)
 	case LSCLK_PERI:
 		ret = rk1808_peri_set_clk(priv, clk->id, rate);
 		break;
+	case SCLK_32K_IOE:
+		return 0;
 	default:
 		return -ENOENT;
 	}
@@ -1060,11 +1198,45 @@ static int rk1808_clk_set_phase(struct clk *clk, int degrees)
 	return ret;
 }
 
+#if CONFIG_IS_ENABLED(OF_CONTROL) && !CONFIG_IS_ENABLED(OF_PLATDATA)
+static int rk1808_gmac_set_parent(struct clk *clk, struct clk *parent)
+{
+	struct rk1808_clk_priv *priv = dev_get_priv(clk->dev);
+	struct rk1808_cru *cru = priv->cru;
+
+	if (parent->id == SCLK_GMAC_SRC) {
+		debug("%s: switching GAMC to SCLK_GMAC_SRC\n", __func__);
+		rk_clrsetreg(&cru->clksel_con[27], RMII_EXTCLK_SEL_MASK,
+			     RMII_EXTCLK_SEL_INT << RMII_EXTCLK_SEL_SHIFT);
+	} else {
+		debug("%s: switching GMAC to external clock\n", __func__);
+		rk_clrsetreg(&cru->clksel_con[27], RMII_EXTCLK_SEL_MASK,
+			     RMII_EXTCLK_SEL_EXT << RMII_EXTCLK_SEL_SHIFT);
+	}
+	return 0;
+}
+
+static int rk1808_clk_set_parent(struct clk *clk, struct clk *parent)
+{
+	switch (clk->id) {
+	case SCLK_GMAC:
+		return rk1808_gmac_set_parent(clk, parent);
+	case SCLK_32K_IOE:
+		return 0;
+	default:
+		return -ENOENT;
+	}
+}
+#endif
+
 static struct clk_ops rk1808_clk_ops = {
 	.get_rate = rk1808_clk_get_rate,
 	.set_rate = rk1808_clk_set_rate,
 	.get_phase	= rk1808_clk_get_phase,
 	.set_phase	= rk1808_clk_set_phase,
+#if CONFIG_IS_ENABLED(OF_CONTROL) && !CONFIG_IS_ENABLED(OF_PLATDATA)
+	.set_parent	= rk1808_clk_set_parent,
+#endif
 };
 
 static int rk1808_clk_probe(struct udevice *dev)

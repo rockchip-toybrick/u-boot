@@ -48,21 +48,9 @@
  */
 #define CONFIG_SYS_NAND_ADDR		NAND_BASE	/* physical address */
 							/* to access nand */
-#define CONFIG_SYS_NAND_BUSWIDTH_16BIT
 #define CONFIG_NAND_OMAP_ECCSCHEME	OMAP_ECC_HAM1_CODE_SW
 #define CONFIG_SYS_NAND_PAGE_SIZE	2048
 #define CONFIG_SYS_NAND_OOBSIZE		64
-
-#ifdef CONFIG_NAND
-#define CONFIG_MTD_PARTITIONS	/* required for UBI partition support */
-
-#define MTDIDS_DEFAULT			"nand0=omap2-nand.0"
-#define MTDPARTS_DEFAULT		"mtdparts=omap2-nand.0:512k(xloader),"\
-					"1920k(uboot),128k(uboot-env),"\
-					"10m(boot),-(rootfs)"
-#else
-#define MTDPARTS_DEFAULT
-#endif
 
 
 #define CONFIG_BOOTCOMMAND \

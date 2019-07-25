@@ -12,6 +12,8 @@ source "drivers/power/regulator/Kconfig"
 
 source "drivers/power/dvfs/Kconfig"
 
+source "drivers/power/charge/Kconfig"
+
 config DM_CHARGE_DISPLAY
 	bool "Enable driver model for charge display support"
 	depends on DM
@@ -82,6 +84,7 @@ endchoice
 config CHARGE_ANIMATION
 	bool "Enable charge animation"
 	depends on DM_CHARGE_DISPLAY && DM_FUEL_GAUGE
+	select ARM_CPU_SUSPEND
 	help
 	  This adds a simple function for charge animation display.
 

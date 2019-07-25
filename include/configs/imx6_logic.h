@@ -152,16 +152,8 @@
 #define CONFIG_SYS_NAND_U_BOOT_OFFS	0x200000
 
 /* MTD device */
-# define CONFIG_MTD_DEVICE
-# define CONFIG_MTD_PARTITIONS
-# define MTDIDS_DEFAULT		"nand0=gpmi-nand"
-# define MTDPARTS_DEFAULT	"mtdparts=gpmi-nand:4m(uboot)," \
-					"1m(env),16m(kernel),1m(dtb),-(fs)"
 
 /* DMA stuff, needed for GPMI/MXS NAND support */
-#define CONFIG_APBH_DMA
-#define CONFIG_APBH_DMA_BURST
-#define CONFIG_APBH_DMA_BURST8
 
 /* EEPROM  contains serial no, MAC addr and other Logic PD info */
 #define CONFIG_I2C_EEPROM

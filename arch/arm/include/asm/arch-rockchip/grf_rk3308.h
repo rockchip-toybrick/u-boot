@@ -169,8 +169,30 @@ struct rk3308_grf {
 	unsigned int os_reg9;
 	unsigned int os_reg10;
 	unsigned int os_reg11;
-	unsigned int reserved38[(0x800 - 0x52C) / 4 - 1];
+	unsigned int reserved38[(0x600 - 0x52c) / 4 - 1];
+	unsigned int soc_con12;
+	unsigned int reserved39;
+	unsigned int soc_con13;
+	unsigned int soc_con14;
+	unsigned int soc_con15;
+	unsigned int reserved40[(0x800 - 0x610) / 4 - 1];
 	unsigned int chip_id;
 };
 check_member(rk3308_grf, gpio0a_p, 0xa0);
+
+struct rk3308_sgrf {
+	unsigned int soc_con0;
+	unsigned int soc_con1;
+	unsigned int con_tzma_r0size;
+	unsigned int con_secure0;
+	unsigned int reserved0;
+	unsigned int clk_timer_en;
+	unsigned int clkgat_con;
+	unsigned int fastboot_addr;
+	unsigned int fastboot_en;
+	unsigned int reserved1[(0x30 - 0x24) / 4];
+	unsigned int srst_con;
+};
+check_member(rk3308_sgrf, fastboot_en, 0x20);
+
 #endif

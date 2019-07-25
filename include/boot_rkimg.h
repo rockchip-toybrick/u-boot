@@ -16,6 +16,8 @@ enum _boot_mode {
 	BOOT_MODE_CHARGING,
 	BOOT_MODE_UMS,
 	BOOT_MODE_BROM_DOWNLOAD,
+	BOOT_MODE_PANIC,
+	BOOT_MODE_WATCHDOG,
 	BOOT_MODE_UNDEFINE,
 };
 
@@ -24,11 +26,15 @@ enum _boot_mode {
 #define PART_BOOT			"boot"
 #define PART_RECOVERY			"recovery"
 #define PART_DTBO			"dtbo"
+#define PART_LOGO			"logo"
 
 #define RK_BLK_SIZE 512
 
 int rockchip_get_boot_mode(void);
 int boot_rockchip_image(struct blk_desc *dev, disk_partition_t *boot_part);
+int read_rockchip_image(struct blk_desc *dev_desc,
+			disk_partition_t *part_info, void *dst);
+
 struct blk_desc *rockchip_get_bootdev(void);
 
 /*

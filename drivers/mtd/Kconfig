@@ -1,5 +1,8 @@
 menu "MTD Support"
 
+config MTD_PARTITIONS
+	bool
+
 config MTD
 	bool "Enable Driver Model for MTD drivers"
 	depends on DM
@@ -8,10 +11,32 @@ config MTD
 	  flash, RAM and similar chips, often used for solid state file
 	  systems on embedded devices.
 
+config MTD_BLK
+	bool "Enable mtd block model for MTD drivers"
+	depends on MTD
+	help
+	  Enable mtd block model for Memory Technology Devices (MTD).
+
 config MTD_NOR_FLASH
 	bool "Enable parallel NOR flash support"
 	help
 	  Enable support for parallel NOR flash.
+
+config MTD_DEVICE
+	bool "Enable MTD Device for NAND and ONENAND devices"
+	help
+	  Adds the MTD device infrastructure from the Linux kernel.
+	  Needed for mtdparts command support.
+
+config FLASH_CFI_DRIVER
+	bool "Enable CFI Flash driver"
+	help
+	  The Common Flash Interface specification was developed by Intel,
+	  AMD and other flash manufactures. It provides a universal method
+	  for probing the capabilities of flash devices. If you wish to
+	  support any device that is CFI-compliant, you need to enable this
+	  option. Visit <http://www.amd.com/products/nvd/overview/cfi.html>
+	  for more information on CFI.
 
 config CFI_FLASH
 	bool "Enable Driver Model for CFI Flash driver"
@@ -40,10 +65,17 @@ config FLASH_PIC32
 	  This enables access to Microchip PIC32 internal non-CFI flash
 	  chips through PIC32 Non-Volatile-Memory Controller.
 
-endmenu
+config RENESAS_RPC_HF
+	bool "Renesas RCar Gen3 RPC Hyperflash driver"
+	depends on RCAR_GEN3 && MTD
+	help
+	  This enables access to Hyperflash memory through the Renesas
+	  RCar Gen3 RPC controller.
 
 source "drivers/mtd/nand/Kconfig"
 
 source "drivers/mtd/spi/Kconfig"
 
 source "drivers/mtd/ubi/Kconfig"
+
+endmenu

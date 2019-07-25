@@ -77,9 +77,7 @@
 
 #ifdef CONFIG_NAND_ARASAN
 # define CONFIG_SYS_MAX_NAND_DEVICE	1
-# define CONFIG_SYS_NAND_SELF_INIT
 # define CONFIG_SYS_NAND_ONFI_DETECTION
-# define CONFIG_MTD_DEVICE
 #endif
 
 /* Miscellaneous configurable options */

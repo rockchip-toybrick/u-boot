@@ -10,9 +10,6 @@
 
 extern char console_buffer[];
 
-#define CONSOLE_EVT_CTRL_B	0x02
-#define CONSOLE_EVT_CTRL_D	0x04
-
 /* common/console.c */
 int console_init_f(void);	/* Before relocation; uses the serial  stuff */
 int console_init_r(void);	/* After  relocation; uses the console stuff */
@@ -44,6 +41,11 @@ void console_record_reset(void);
  * This should be called to enable the console buffer.
  */
 void console_record_reset_enable(void);
+
+/**
+ * console_record_print_purge() - print record data and remove data from buffers
+ */
+void console_record_print_purge(void);
 
 /**
  * console_announce_r() - print a U-Boot console on non-serial consoles

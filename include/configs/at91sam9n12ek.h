@@ -64,7 +64,6 @@
 
 /* NAND flash */
 #ifdef CONFIG_CMD_NAND
-#define CONFIG_NAND_ATMEL
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE		0x40000000
 #define CONFIG_SYS_NAND_MASK_ALE	(1 << 21)
@@ -72,21 +71,6 @@
 #define CONFIG_SYS_NAND_ENABLE_PIN	GPIO_PIN_PD(4)
 #define CONFIG_SYS_NAND_READY_PIN	GPIO_PIN_PD(5)
 #endif
-
-/* PMECC & PMERRLOC */
-#define CONFIG_ATMEL_NAND_HWECC
-#define CONFIG_ATMEL_NAND_HW_PMECC
-#define CONFIG_PMECC_CAP		2
-#define CONFIG_PMECC_SECTOR_SIZE	512
-#define CONFIG_PMECC_INDEX_TABLE_OFFSET	0x8000
-
-#define CONFIG_MTD_PARTITIONS
-#define CONFIG_MTD_DEVICE
-#define MTDIDS_DEFAULT			"nand0=atmel_nand"
-#define MTDPARTS_DEFAULT						\
-	"mtdparts=atmel_nand:256k(bootstrap)ro,512k(uboot)ro,"		\
-	"256k(env),256k(env_redundant),256k(spare),"			\
-	"512k(dtb),6M(kernel)ro,-(rootfs)"
 
 #define CONFIG_EXTRA_ENV_SETTINGS                                       \
 	"console=console=ttyS0,115200\0"                                \
@@ -200,7 +184,6 @@
 #define CONFIG_SYS_NAND_OOBSIZE		64
 #define CONFIG_SYS_NAND_BLOCK_SIZE	0x20000
 #define CONFIG_SYS_NAND_BAD_BLOCK_POS	0x0
-#define CONFIG_SPL_GENERATE_ATMEL_PMECC_HEADER
 
 #elif CONFIG_SYS_USE_SPIFLASH
 #define CONFIG_SPL_SPI_LOAD

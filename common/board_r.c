@@ -56,6 +56,7 @@
 #include <linux/err.h>
 #include <efi_loader.h>
 #include <sysmem.h>
+#include <bidram.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -255,7 +256,12 @@ static int initr_malloc(void)
 static int initr_console_record(void)
 {
 #if defined(CONFIG_CONSOLE_RECORD)
-	return console_record_init();
+	int ret;
+
+	ret = console_record_init();
+	if (!ret)
+		console_record_reset_enable();
+	return ret;
 #else
 	return 0;
 #endif
@@ -399,8 +405,8 @@ static int initr_flash(void)
 #if defined(CONFIG_PPC) && !defined(CONFIG_DM_SPI)
 static int initr_spi(void)
 {
-	/* PPC does this here */
-#ifdef CONFIG_SPI
+	/* MPC8xx does this here */
+#ifdef CONFIG_MPC8XX_SPI
 #if !defined(CONFIG_ENV_IS_IN_EEPROM)
 	spi_init_f();
 #endif
@@ -711,7 +717,7 @@ __weak int interrupt_debugger_init(void)
 	return 0;
 }
 
-__weak int dram_initr_banksize(void)
+__weak int board_initr_caches_fixup(void)
 {
 	return 0;
 }
@@ -760,15 +766,18 @@ static init_fnc_t init_sequence_r[] = {
 	 * like other regions, otherwise there would be dcache coherence issue
 	 * between firmware and U-Boot.
 	 */
-	dram_initr_banksize,
+	board_initr_caches_fixup,
 
 #if defined(CONFIG_SYS_INIT_RAM_LOCK) && defined(CONFIG_E500)
 	initr_unlock_ram_in_cache,
 #endif
 	initr_barrier,
 	initr_malloc,
+#ifdef CONFIG_BIDRAM
+	bidram_initr,
+#endif
 #ifdef CONFIG_SYSMEM
-	sysmem_init,		/* After malloc setup */
+	sysmem_initr,
 #endif
 	log_init,
 	initr_bootstage,	/* Needs malloc() but has its own timer */

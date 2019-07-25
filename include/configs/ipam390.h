@@ -138,7 +138,6 @@
 /*
  * Flash & Environment
  */
-#define CONFIG_NAND_DAVINCI
 #define CONFIG_ENV_OFFSET		0x0 /* Block 0--not used by bootcode */
 #define CONFIG_ENV_SIZE			(128 << 10)
 #define	CONFIG_SYS_NAND_USE_FLASH_BBT
@@ -176,7 +175,6 @@
 #define CONFIG_SPL_NAND_BASE
 #define CONFIG_SPL_NAND_DRIVERS
 #define CONFIG_SPL_NAND_ECC
-#define CONFIG_SPL_NAND_SIMPLE
 #define CONFIG_SPL_NAND_LOAD
 
 /*
@@ -237,22 +235,6 @@
 #ifdef CONFIG_CMD_BDI
 #define CONFIG_CLOCKS
 #endif
-
-#ifndef CONFIG_DRIVER_TI_EMAC
-#endif
-
-#define CONFIG_MTD_DEVICE
-#define CONFIG_MTD_PARTITIONS
-
-#define MTDIDS_NAME_STR		"davinci_nand.0"
-#define MTDIDS_DEFAULT		"nand0=" MTDIDS_NAME_STR
-#define MTDPARTS_DEFAULT	"mtdparts=" MTDIDS_NAME_STR ":" \
-					"128k(u-boot-env),"	\
-					"1408k(u-boot),"	\
-					"128k(bootparms),"	\
-					"384k(factory-info),"	\
-					"4M(kernel),"	\
-					"-(rootfs)"
 
 /* defines for SPL */
 #define CONFIG_SPL_FRAMEWORK

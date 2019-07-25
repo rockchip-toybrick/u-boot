@@ -136,8 +136,8 @@
 #define CONFIG_SYS_NS16550_CLK	clk_get(DAVINCI_UART2_CLKID)
 #define CONFIG_CONS_INDEX	1		/* use UART0 for console */
 
-#define CONFIG_SPI
-#define CONFIG_DAVINCI_SPI
+#define CONFIG_SYS_SPI_CLK		clk_get(DAVINCI_SPI1_CLKID)
+#ifdef CONFIG_SPL_BUILD
 #define CONFIG_SYS_SPI_BASE		DAVINCI_SPI1_BASE
 #define CONFIG_SYS_SPI_CLK		clk_get(DAVINCI_SPI1_CLKID)
 #define CONFIG_SF_DEFAULT_SPEED		30000000
@@ -162,7 +162,6 @@
  * Flash & Environment
  */
 #ifdef CONFIG_USE_NAND
-#define CONFIG_NAND_DAVINCI
 #define CONFIG_ENV_OFFSET		0x0 /* Block 0--not used by bootcode */
 #define CONFIG_ENV_SIZE			(128 << 10)
 #define	CONFIG_SYS_NAND_USE_FLASH_BBT
@@ -200,7 +199,6 @@
 #define CONFIG_SPL_NAND_BASE
 #define CONFIG_SPL_NAND_DRIVERS
 #define CONFIG_SPL_NAND_ECC
-#define CONFIG_SPL_NAND_SIMPLE
 #define CONFIG_SPL_NAND_LOAD
 #endif
 
@@ -266,15 +264,7 @@
 #ifndef CONFIG_DRIVER_TI_EMAC
 #endif
 
-#ifdef CONFIG_USE_NAND
-#define CONFIG_MTD_DEVICE
-#define CONFIG_MTD_PARTITIONS
-#endif
-
-#ifdef CONFIG_USE_SPIFLASH
-#endif
-
-#if !defined(CONFIG_USE_NAND) && \
+#if !defined(CONFIG_NAND) && \
 	!defined(CONFIG_USE_NOR) && \
 	!defined(CONFIG_USE_SPIFLASH)
 #define CONFIG_ENV_SIZE		(16 << 10)

@@ -250,14 +250,13 @@
 				/* LB refresh timer prescal, 266MHz/32 */
 #define CONFIG_SYS_LBC_MRTPR	0x20000000  /*TODO */
 
-/* drivers/mtd/nand/nand.c */
+/* drivers/mtd/nand/raw/nand.c */
 #if defined(CONFIG_NAND) && defined(CONFIG_SPL_BUILD)
 #define CONFIG_SYS_NAND_BASE		0xFFF00000
 #else
 #define CONFIG_SYS_NAND_BASE		0xE2800000
 #endif
 
-#define CONFIG_MTD_DEVICE
 #define CONFIG_MTD_PARTITION
 #define MTDIDS_DEFAULT			"nand0=e2800000.flash"
 #define MTDPARTS_DEFAULT		\

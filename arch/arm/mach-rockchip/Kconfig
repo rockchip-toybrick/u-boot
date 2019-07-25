@@ -2,13 +2,13 @@ if ARCH_ROCKCHIP
 
 config ROCKCHIP_PX30
 	bool "Support Rockchip PX30"
-	select ARM64
+	select ARM64 if !ARM64_BOOT_AARCH32
 	select GICV2
 	select ARM_SMCCC
 	select SUPPORT_SPL
 	select SUPPORT_TPL
-	select SPL
-	select TPL
+	select SPL if !ARM64_BOOT_AARCH32
+	select TPL if !ARM64_BOOT_AARCH32
 	select TPL_TINY_FRAMEWORK if TPL
 
 	imply SPL_SERIAL_SUPPORT
@@ -215,6 +215,17 @@ config ROCKCHIP_RK3308
 	select DEBUG_UART_BOARD_INIT
 	select ARM_SMCCC
 	select GICV2
+	select SUPPORT_SPL if !ARM64_BOOT_AARCH32
+	select SUPPORT_TPL if !ARM64_BOOT_AARCH32
+	select SPL if !ARM64_BOOT_AARCH32
+	select TPL if !ARM64_BOOT_AARCH32
+	imply SPL_CLK
+	imply SPL_REGMAP
+	imply SPL_SYSCON
+	imply SPL_RAM
+	imply SPL_SERIAL_SUPPORT
+	imply TPL_SERIAL_SUPPORT
+	imply SPL_SEPARATE_BSS
 	help
 	  The Rockchip RK3308 is a ARM-based Soc which embeded with quad
 	  Cortex-A35 and highly integrated audio interfaces.
@@ -282,6 +293,12 @@ config ROCKCHIP_RK3368
 	  I2S, UARTs, SPI, I2C and PWMs.
 
 if ROCKCHIP_RK3368
+
+config ROCKCHIP_PX5
+	bool "Support Rockchip PX5"
+	help
+	  PX5 is a variant of RK3368, it shares codes with RK3368, but we still
+	  need this macro to distinguish PX5 and RK3368.
 
 config TPL_LDSCRIPT
 	default "arch/arm/mach-rockchip/rk3368/u-boot-tpl.lds"
@@ -536,6 +553,14 @@ config RKIMG_BOOTLOADER
 	  recovery.img with Ramdisk, packed with 'KNRL' header; and resource.img
 	  with dtb and uboot/kernel logo bmp, vendor storage for custom info
 	  like SN and MAC address.
+
+config RKIMG_ANDROID_BOOTMODE_LEGACY
+	bool "Support set androidboot.mode with legacy rule"
+	depends on RKIMG_BOOTLOADER
+	default n
+	help
+	  Rockchip set "androidboot.mode=" as "charger" or boot media for android,
+	  which is a rockchip private solution(SDK < 8.1) and deprecated.
 
 config ROCKCHIP_RESOURCE_IMAGE
 	bool "Enable support for rockchip resource image"

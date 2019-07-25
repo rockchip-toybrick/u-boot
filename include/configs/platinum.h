@@ -66,7 +66,6 @@
 #ifdef CONFIG_CMD_NAND
 
 /* NAND config */
-#define CONFIG_NAND_MXS
 #ifndef CONFIG_SYS_NAND_MAX_CHIPS
 #define CONFIG_SYS_NAND_MAX_CHIPS		2
 #endif
@@ -76,9 +75,6 @@
 #define CONFIG_SYS_NAND_ONFI_DETECTION
 
 /* DMA config, needed for GPMI/MXS NAND support */
-#define CONFIG_APBH_DMA
-#define CONFIG_APBH_DMA_BURST
-#define CONFIG_APBH_DMA_BURST8
 
 /* Environment in NAND */
 #define CONFIG_ENV_OFFSET		(16 << 20)
@@ -113,8 +109,6 @@
 #define CONFIG_PREBOOT
 
 /* MTD/UBI/UBIFS config */
-#define CONFIG_MTD_DEVICE
-#define CONFIG_MTD_PARTITIONS
 
 #if (CONFIG_SYS_NAND_MAX_CHIPS == 1)
 #define MTDIDS_DEFAULT		"nand0=gpmi-nand"

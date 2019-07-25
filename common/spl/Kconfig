@@ -125,6 +125,19 @@ config SPL_DISPLAY_PRINT
 	  banner ("U-Boot SPL ..."). This function should be provided by
 	  the board.
 
+config SPL_SKIP_RELOCATE
+	bool "Skip code relocation in SPL"
+	default y
+	help
+	  The SPL code will be relocated to a high memory if you say no here.
+	  Only ARM64 and PowerPC SPL support relocate now.
+
+config SPL_RELOC_TEXT_BASE
+	hex "Address the SPL relocate to"
+	depends on !SPL_SKIP_RELOCATE
+	help
+	  The address on the ram where the SPL relocate to.
+
 config SYS_MMCSD_RAW_MODE_U_BOOT_USE_SECTOR
 	bool "MMC raw mode: by sector"
 	default y if ARCH_SUNXI || ARCH_DAVINCI || ARCH_UNIPHIER ||ARCH_MX6 || \
@@ -445,7 +458,7 @@ config SPL_NAND_SUPPORT
 	help
 	  Enable support for NAND (Negative AND) flash in SPL. NAND flash
 	  can be used to allow SPL to load U-Boot from supported devices.
-	  This enables the drivers in drivers/mtd/nand as part of an SPL
+	  This enables the drivers in drivers/mtd/nand/raw as part of an SPL
 	  build.
 
 config SPL_NET_SUPPORT
@@ -610,6 +623,33 @@ config SPL_SPI_FLASH_SUPPORT
 	  lines). This enables the drivers in drivers/mtd/spi as part of an
 	  SPL build. This normally requires SPL_SPI_SUPPORT.
 
+if SPL_SPI_FLASH_SUPPORT
+
+config SPL_SPI_FLASH_TINY
+	bool "Enable low footprint SPL SPI Flash support"
+	depends on !SPI_FLASH_BAR
+	help
+	 Enable lightweight SPL SPI Flash support that supports just reading
+	 data/images from flash. No support to write/erase flash. Enable
+	 this if you have SPL size limitations and don't need full
+	 fledged SPI flash support.
+
+config SPL_SPI_FLASH_SFDP_SUPPORT
+	bool "SFDP table parsing support for SPI NOR flashes"
+	depends on !SPI_FLASH_BAR && !SPL_SPI_FLASH_TINY
+	help
+	 Enable support for parsing and auto discovery of parameters for
+	 SPI NOR flashes using Serial Flash Discoverable Parameters (SFDP)
+	 tables as per JESD216 standard in SPL.
+
+config SPL_SPI_LOAD
+	bool "Support loading from SPI flash"
+	help
+	  Enable support for loading next stage, U-Boot or otherwise, from
+	  SPI NOR in U-Boot SPL.
+
+endif # SPL_SPI_FLASH_SUPPORT
+
 config SPL_SPI_SUPPORT
 	bool "Support SPI drivers"
 	help
@@ -744,6 +784,24 @@ config SPL_OPTEE
 	help
 	  OP-TEE is an open source Trusted OS  which is loaded by SPL.
 	  More detail at: https://github.com/OP-TEE/optee_os
+
+config SPL_LOAD_RKFW
+	bool "SPL support load rockchip firmware images"
+	depends on SPL
+	help
+	  This enables SPL support load rockchip firmware images.
+	  Please define both RKFW_TRUST_SECTOR and RKFW_U_BOOT_SECTOR
+	  for trust and U-Boot images.
+
+config RKFW_TRUST_SECTOR
+	hex "rockchip trust image load sector"
+	depends on SPL_LOAD_RKFW
+	default 0x6000
+
+config RKFW_U_BOOT_SECTOR
+	hex "rockchip uboot image load sector"
+	depends on SPL_LOAD_RKFW
+	default 0x4000
 
 config TPL
 	bool

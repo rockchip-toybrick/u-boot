@@ -68,7 +68,6 @@
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE		0x40000000
 #define CONFIG_SYS_NAND_DBW_8
-#define CONFIG_NAND_ATMEL
 /* our ALE is AD21 */
 #define CONFIG_SYS_NAND_MASK_ALE	(1 << 21)
 /* our CLE is AD22 */
@@ -150,12 +149,6 @@
 #endif
 
 /* File systems */
-#define CONFIG_MTD_DEVICE
-#define CONFIG_MTD_PARTITIONS
-#if defined(CONFIG_CMD_MTDPARTS) || defined(CONFIG_CMD_NAND)
-#define MTDIDS_DEFAULT		"nand0=atmel_nand"
-#define MTDPARTS_DEFAULT	"mtdparts=atmel_nand:-(root)"
-#endif
 
 /* Boot command */
 #define CONFIG_CMDLINE_TAG

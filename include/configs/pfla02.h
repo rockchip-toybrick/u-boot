@@ -57,7 +57,6 @@
 #define CONFIG_CMD_NAND
 /* Enable NAND support */
 #define CONFIG_CMD_NAND_TRIMFFS
-#define CONFIG_NAND_MXS
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_BASE		0x40000000
 #define CONFIG_SYS_NAND_5_ADDR_CYCLE
@@ -65,16 +64,8 @@
 #endif
 
 /* DMA stuff, needed for GPMI/MXS NAND support */
-#define CONFIG_APBH_DMA
-#define CONFIG_APBH_DMA_BURST
-#define CONFIG_APBH_DMA_BURST8
 
 /* Filesystem support */
-#define CONFIG_MTD_PARTITIONS
-#define CONFIG_MTD_DEVICE
-#define MTDIDS_DEFAULT    "nand0=gpmi-nand"
-#define MTDPARTS_DEFAULT  "mtdparts=gpmi-nand:-(nand);" \
-	"spi2.0:1024k(bootloader),64k(env1),64k(env2),-(rescue)"
 
 /* Various command support */
 
