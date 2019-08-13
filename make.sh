@@ -640,6 +640,7 @@ pack_spl_loader_image()
 	cp ${OUTDIR}/tpl/u-boot-tpl.bin ${RKBIN}/.temp/
 	cp ${ini} ${RKBIN}/.temp/${RKCHIP_LOADER}MINIALL.ini -f
 
+	cp ${RKTOOLS}/boot_merger ${RKBIN}/${RKTOOLS}/
 	cd ${RKBIN}
 	if [ "$mode" = 'spl' ]; then	# pack tpl+spl
 		# Update ini
@@ -755,6 +756,7 @@ __pack_64bit_trust_image()
 		return
 	fi
 
+	cp ${RKTOOLS}/trust_merger ${RKBIN}/${RKTOOLS}/
 	cd ${RKBIN}
 	${RKTOOLS}/trust_merger ${PLATFORM_SHA} ${PLATFORM_RSA} ${PLATFORM_TRUST_IMG_SIZE} ${BIN_PATH_FIXUP} \
 				${PACK_IGNORE_BL32} ${ini}
