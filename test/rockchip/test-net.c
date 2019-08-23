@@ -1,24 +1,20 @@
 /*
- * (C) Copyright 2017 Rockchip Electronics Co., Ltd
+ * (C) Copyright 2019 Rockchip Electronics Co., Ltd
  *
  * SPDX-License-Identifier:     GPL-2.0+
  */
 
-#include <asm/io.h>
-#include <adc.h>
-#include <cli.h>
 #include <common.h>
 #include <dm.h>
-#include <errno.h>
 #include <fdtdec.h>
 #include <malloc.h>
-#include <irq-generic.h>
-#include <irq-platform.h>
 #include <miiphy.h>
 #include <net.h>
 #include <phy.h>
+#include <asm/io.h>
 #include "test-rockchip.h"
 
+#ifdef CONFIG_GMAC_ROCKCHIP
 #define LOOPBACK_TEST_HDR_SIZE		14
 #define LOOPBACK_TEST_DATA_SIZE		1500
 #define LOOPBACK_TEST_FRAME_SIZE	(14 + 1500)
@@ -38,9 +34,9 @@ enum loopback_speed {
 	LOOPBACK_SPEED_100	= 100,
 	LOOPBACK_SPEED_1000	= 1000
 };
-
+#ifdef CONFIG_RKIMG_BOOTLOADER
 extern void gmac_set_rgmii(struct udevice *dev, u32 tx_delay, u32 rx_delay);
-
+#endif
 static struct phy_device *get_current_phydev(void)
 {
 	struct mii_dev *bus = mdio_get_current_dev();
@@ -134,8 +130,8 @@ static int eth_run_loopback_test(struct udevice *current, int speed, int delay_t
 	u32 i, j;
 
 	/* make sure the net_tx_packet is initialized (net_init() was called) */
-	assert(net_tx_packet != NULL);
-	if (net_tx_packet == NULL)
+	assert(net_tx_packet);
+	if (!net_tx_packet)
 		return -EINVAL;
 
 	net_set_ether(net_tx_packet, net_bcast_ethaddr, LOOPBACK_TEST_DATA_SIZE);
@@ -147,9 +143,10 @@ static int eth_run_loopback_test(struct udevice *current, int speed, int delay_t
 		if (delay_test)
 			printf("[0x%02x]:", i);
 		for (j = 0x0; j < MAX_RX_DELAY_LINE; j++) {
+#ifdef CONFIG_RKIMG_BOOTLOADER
 			if (delay_test)
 				gmac_set_rgmii(current, i, j);
-
+#endif
 			alter_lbtest_frame(tx_pkt, LOOPBACK_TEST_DATA_SIZE, i, j);
 			net_send_packet(net_tx_packet, LOOPBACK_TEST_FRAME_SIZE);
 
@@ -249,20 +246,20 @@ static void do_eth_help(void)
 	printf("rktest eth dhcp address IP:file - Boot image via network using DHCP/TFTP protocol, example: rktest eth dhcp 0x62000000 192.168.1.100:Image\n");
 }
 
-int board_eth_test(int argc, char * const argv[])
+int do_test_eth(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv[])
 {
-	int ret;
-	char cmd_eth[512] = {0};
-	int i, speed;
-	u32 tx_delay, rx_delay;
 	struct udevice *current;
+	u32 tx_delay, rx_delay;
+	char cmd_eth[512] = "dhcp $kernel_addr_r 172.16.12.246:golden/arm/rootfs.cpio.gz";
+	int i, speed;
+	int ret;
 
 	current = eth_get_dev();
 	if (!current || !device_active(current))
 		return -EINVAL;
 
 	switch (argc) {
-	case 3:
+	case 2:
 		if (!strncmp(argv[2], "delaytest", sizeof("delaytest"))) {
 			/* Force 1000 speed test */
 			speed = LOOPBACK_SPEED_1000;
@@ -273,18 +270,20 @@ int board_eth_test(int argc, char * const argv[])
 			return 0;
 		}
 		break;
-	case 4:
+	case 3:
 		if (!strncmp(argv[2], "loopback", sizeof("loopback"))) {
 			speed = simple_strtoul(argv[3], NULL, 0);
 			ret = eth_loopback_test(speed, 0);
 			return ret;
 		}
 		break;
-	case 5:
+	case 4:
 		if (!strncmp(argv[2], "delayline", sizeof("delayline"))) {
 			tx_delay = simple_strtoul(argv[3], NULL, 0);
 			rx_delay = simple_strtoul(argv[4], NULL, 0);
+#ifdef CONFIG_RKIMG_BOOTLOADER
 			gmac_set_rgmii(current, tx_delay, rx_delay);
+#endif
 			return 0;
 		}
 		break;
@@ -292,19 +291,43 @@ int board_eth_test(int argc, char * const argv[])
 		break;
 	}
 
-	for (i = 2; i < argc; i++) {
-		strncat(cmd_eth, argv[i], sizeof(cmd_eth));
+	for (i = 1; i < argc; i++) {
+		if (i == 1)
+			sprintf(cmd_eth, argv[i]);
+		else
+			strncat(cmd_eth, argv[i], sizeof(argv[i]));
 		if (i < argc - 1)
 			strncat(cmd_eth, " ", sizeof(" "));
 	}
 
 	/* run dhcp/tftp test */
-	ret = cli_simple_run_command(cmd_eth, 0);
-	if (ret < 0) {
+	ret = run_command(cmd_eth, 0);
+	if (ret) {
 		printf("DHCP test error: %d\n", ret);
 		return ret;
 	}
 
-
 	return 0;
 }
+#endif
+
+static cmd_tbl_t sub_cmd[] = {
+#ifdef CONFIG_GMAC_ROCKCHIP
+	UNIT_CMD_DEFINE(eth, 0),
+#endif
+};
+
+static const char sub_cmd_help[] =
+#ifdef CONFIG_GMAC_ROCKCHIP
+"    [i] rktest eth                         - test ethernet\n"
+#else
+""
+#endif
+;
+
+struct cmd_group cmd_grp_net = {
+	.id	= TEST_ID_NET,
+	.help	= sub_cmd_help,
+	.cmd	= sub_cmd,
+	.cmd_n	= ARRAY_SIZE(sub_cmd),
+};

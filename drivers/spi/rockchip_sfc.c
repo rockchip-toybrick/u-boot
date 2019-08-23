@@ -22,6 +22,12 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#ifdef SFC_DEBUG
+#define SFC_DBG printf
+#else
+#define SFC_DBG(args...)
+#endif
+
 struct rockchip_sfc_reg {
 	u32 ctrl;
 	u32 imr;
@@ -42,6 +48,7 @@ struct rockchip_sfc_reg {
 	u32 addr;
 	u32 data;
 };
+
 check_member(rockchip_sfc_reg, data, 0x108);
 
 /*SFC_CTRL*/
@@ -104,7 +111,7 @@ enum rockchip_sfc_if_type {
 
 struct rockchip_sfc_platdata {
 	s32 frequency;
-	fdt_addr_t base;
+	void *base;
 };
 
 struct rockchip_sfc {
@@ -125,27 +132,24 @@ static int rockchip_sfc_ofdata_to_platdata(struct udevice *bus)
 {
 	struct rockchip_sfc_platdata *plat = dev_get_platdata(bus);
 	struct rockchip_sfc *sfc = dev_get_priv(bus);
-	const void *blob = gd->fdt_blob;
-	int node = dev_of_offset(bus);
-	int subnode;
+	ofnode subnode;
 	int ret;
 
-	plat->base = devfdt_get_addr(bus);
-
+	plat->base = dev_read_addr_ptr(bus);
 	ret = clk_get_by_index(bus, 0, &sfc->clk);
 	if (ret < 0) {
-		debug("Could not get clock for %s: %d\n", bus->name, ret);
+		printf("Could not get clock for %s: %d\n", bus->name, ret);
 		return ret;
 	}
 
-	subnode = fdt_first_subnode(blob, node);
-	if (subnode < 0) {
-		debug("Error: subnode with SPI flash config missing!\n");
+	subnode = dev_read_first_subnode(bus);
+	if (!ofnode_valid(subnode)) {
+		printf("Error: subnode with SPI flash config missing!\n");
 		return -ENODEV;
 	}
 
-	plat->frequency = fdtdec_get_int(blob, subnode, "spi-max-frequency",
-					 100000000);
+	plat->frequency = ofnode_read_u32_default(subnode, "spi-max-frequency",
+						  100000000);
 
 	return 0;
 }
@@ -154,17 +158,8 @@ static int rockchip_sfc_probe(struct udevice *bus)
 {
 	struct rockchip_sfc_platdata *plat = dev_get_platdata(bus);
 	struct rockchip_sfc *sfc = dev_get_priv(bus);
-	int ret;
 
 	sfc->regbase = (struct rockchip_sfc_reg *)plat->base;
-
-	sfc->max_freq = plat->frequency;
-
-	ret = clk_set_rate(&sfc->clk, sfc->max_freq);
-	if (ret < 0) {
-		debug("%s: Failed to set clock: %d\n", __func__, ret);
-		return ret;
-	}
 
 	return 0;
 }
@@ -199,7 +194,7 @@ static int rockchip_sfc_reset(struct rockchip_sfc *sfc)
  * SFC_CTRL cannot be set.
  */
 static int rockchip_sfc_wait_idle(struct rockchip_sfc *sfc,
-                                  u32 timeout_ms)
+				  u32 timeout_ms)
 {
 	struct rockchip_sfc_reg *regs = sfc->regbase;
 	unsigned long tbase = get_timer(0);
@@ -208,7 +203,9 @@ static int rockchip_sfc_wait_idle(struct rockchip_sfc *sfc,
 	while (1) {
 		sr = readl(&regs->sr);
 		fsr = readl(&regs->fsr);
-		if ((fsr & SFC_TX_EMPTY) && (fsr & SFC_RX_EMPTY) && !(sr & SFC_BUSY))
+		if ((fsr & SFC_TX_EMPTY) &&
+		    (fsr & SFC_RX_EMPTY) &&
+		    !(sr & SFC_BUSY))
 			break;
 		if (get_timer(tbase) > timeout_ms) {
 			printf("waite sfc idle timeout(sr:0x%08x fsr:0x%08x)\n",
@@ -251,13 +248,39 @@ static void rockchip_sfc_setup_xfer(struct rockchip_sfc *sfc, u32 trb)
 	u32 val = 0x02;
 	u8 data_width = IF_TYPE_STD;
 
-	if (sfc->addr_bits & SFC_ADDR_XBITS)
+	switch (sfc->addr_bits) {
+	case 0:
+		sfc->addr_bits = SFC_ADDR_0BITS;
+		break;
+	case 8:
+		sfc->addr_bits = SFC_ADDR_XBITS;
+		writel(7, &regs->abit);
+		break;
+	case 16:
+		sfc->addr_bits = SFC_ADDR_XBITS;
+		writel(15, &regs->abit);
+		break;
+	case 24:
+		sfc->addr_bits = SFC_ADDR_24BITS;
+		break;
+	case 32:
+		sfc->addr_bits = SFC_ADDR_32BITS;
+		break;
+	default:
+		pr_err("%s addr-bits error %d\n", __func__, sfc->addr_bits);
+		return;
+	}
+	SFC_DBG("--- sfc.addr_bit %x\n", sfc->addr_bits);
+
+	if (sfc->addr_bits == SFC_ADDR_24BITS ||
+	    sfc->addr_bits == SFC_ADDR_32BITS)
 		data_width = rockchip_sfc_get_if_type(sfc);
 
 	val |= (data_width << SFC_DATA_WIDTH_SHIFT);
 
 	rockchip_sfc_wait_idle(sfc, 10);
 
+	SFC_DBG("--- sfc.ctrl %x\n", val);
 	writel(val, &regs->ctrl);
 
 	val = sfc->cmd;
@@ -266,10 +289,13 @@ static void rockchip_sfc_setup_xfer(struct rockchip_sfc *sfc, u32 trb)
 	val |= sfc->addr_bits << SFC_ADDR_BITS_SHIFT;
 	val |= sfc->dummy_bits << SFC_DUMMY_BITS_SHIFT;
 
+	SFC_DBG("--- sfc.cmd %x\n", val);
 	writel(val, &regs->cmd);
 
-	if (sfc->addr_bits & SFC_ADDR_XBITS)
+	if (sfc->addr_bits & SFC_ADDR_XBITS) {
+		SFC_DBG("--- sfc.addr %x\n", sfc->addr);
 		writel(sfc->addr, &regs->addr);
+	}
 }
 
 static int rockchip_sfc_dma_xfer(struct rockchip_sfc *sfc, void *buffer, size_t trb)
@@ -294,7 +320,7 @@ static int rockchip_sfc_dma_xfer(struct rockchip_sfc *sfc, void *buffer, size_t 
 	rockchip_sfc_setup_xfer(sfc, bb.len_aligned);
 
 	writel(0xFFFFFFFF, &regs->iclr);
-	writel((u32)bb.bounce_buffer, &regs->dmaaddr);
+	writel((unsigned long)bb.bounce_buffer, &regs->dmaaddr);
 	writel(SFC_DMA_START, &regs->dmatr);
 
 	tbase = get_timer(0);
@@ -416,7 +442,7 @@ static int rockchip_sfc_pio_xfer(struct rockchip_sfc *sfc, void *buf, u32 len)
 }
 
 static int rockchip_sfc_read(struct rockchip_sfc *sfc, u32 offset,
-                             void *buf, size_t len)
+			     void *buf, size_t len)
 {
 	u32 dma_trans;
 	u32 trb;
@@ -451,9 +477,8 @@ static int rockchip_sfc_read(struct rockchip_sfc *sfc, u32 offset,
 }
 
 static int rockchip_sfc_write(struct rockchip_sfc *sfc, u32 offset,
-                              void *buf, size_t len)
+			      void *buf, size_t len)
 {
-
 	if (len > SFC_MAX_TRB) {
 		printf("out of the max sfc trb");
 		return -EINVAL;
@@ -462,14 +487,13 @@ static int rockchip_sfc_write(struct rockchip_sfc *sfc, u32 offset,
 	if (len && !(len & (ARCH_DMA_MINALIGN - 1)))
 		return rockchip_sfc_dma_xfer(sfc, buf, len);
 	else
-		return rockchip_sfc_pio_xfer(sfc, buf,len);
+		return rockchip_sfc_pio_xfer(sfc, buf, len);
 
 	return 0;
 }
 
 static int rockchip_sfc_do_xfer(struct rockchip_sfc *sfc, void *buf, size_t len)
 {
-
 	if (sfc->rw)
 		return rockchip_sfc_write(sfc, sfc->addr, buf, len);
 	else
@@ -489,9 +513,17 @@ static int rockchip_sfc_xfer(struct udevice *dev, unsigned int bitlen,
 	if (flags & SPI_XFER_BEGIN) {
 		sfc->cmd = pcmd[0];
 		if (len >= 4) {
-			sfc->addr_bits = SFC_ADDR_24BITS;
+			sfc->addr_bits = 24;
 			sfc->dummy_bits = (len - 4) << 3;
 			sfc->addr = pcmd[3] | (pcmd[2] << 8) | (pcmd[1] << 16);
+		} else if (len == 3 && dout) {
+			sfc->addr_bits = 16;
+			sfc->dummy_bits = 0;
+			sfc->addr = pcmd[2] | pcmd[1] << 8;
+		} else if (len == 2 && dout) {
+			sfc->addr_bits = 8;
+			sfc->dummy_bits = 0;
+			sfc->addr = pcmd[1];
 		} else {
 			sfc->addr_bits = 0;
 			sfc->dummy_bits = 0;
@@ -500,7 +532,6 @@ static int rockchip_sfc_xfer(struct udevice *dev, unsigned int bitlen,
 	}
 
 	if (flags & SPI_XFER_END) {
-
 		if (din) {
 			sfc->rw = SFC_RD;
 			data_buf = din;

@@ -537,6 +537,7 @@ config CMD_CRYPTO
 	depends on DM_CRYPTO
 	select SHA1
 	select SHA256
+	select SHA512
 	select MD5
 	help
 	  Crypto test.
@@ -928,6 +929,11 @@ config CMD_RKSFC
 	default y if (RKSFC_NOR || RKSFC_NAND)
 	help
 	  Rockchip SFC device support
+
+config CMD_RK_SECURE_STORAGE
+	bool "dump rockchip efuse/otp content"
+	help
+	  Dump the data which is written in OTP or efuse.
 
 config CMD_SATA
 	bool "sata - Access SATA subsystem"

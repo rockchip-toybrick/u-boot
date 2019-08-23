@@ -127,7 +127,7 @@ static int get_public_phy(struct display_state *state,
 		}
 		conn_state->phy = phy;
 
-		printf("inno hdmi phy init success, save it\n");
+		debug("inno hdmi phy init success, save it\n");
 		data->phy_drv = conn_state->phy;
 		data->phy_init = true;
 		return 0;
@@ -179,7 +179,7 @@ static int connector_phy_init(struct display_state *state,
 	if (type == INNO_HDMI_PHY) {
 		/* there is no public phy was initialized */
 		if (!data->phy_init) {
-			printf("start get public phy\n");
+			debug("start get public phy\n");
 			data->public_phy_type = type;
 			if (get_public_phy(state, data)) {
 				printf("can't find correct public phy type\n");
@@ -1047,37 +1047,43 @@ void rockchip_show_fbbase(ulong fbbase)
 	}
 }
 
-void rockchip_show_bmp(const char *bmp)
+int rockchip_show_bmp(const char *bmp)
 {
 	struct display_state *s;
+	int ret = 0;
 
 	if (!bmp) {
 		list_for_each_entry(s, &rockchip_display_list, head)
 			display_disable(s);
-		return;
+		return -ENOENT;
 	}
 
 	list_for_each_entry(s, &rockchip_display_list, head) {
 		s->logo.mode = s->charge_logo_mode;
 		if (load_bmp_logo(&s->logo, bmp))
 			continue;
-		display_logo(s);
+		ret = display_logo(s);
 	}
+
+	return ret;
 }
 
-void rockchip_show_logo(void)
+int rockchip_show_logo(void)
 {
 	struct display_state *s;
+	int ret = 0;
 
 	list_for_each_entry(s, &rockchip_display_list, head) {
 		s->logo.mode = s->logo_mode;
 		if (load_bmp_logo(&s->logo, s->ulogo_name))
 			printf("failed to display uboot logo\n");
 		else
-			display_logo(s);
+			ret = display_logo(s);
 
 		/* Load kernel bmp in rockchip_display_fixup() later */
 	}
+
+	return ret;
 }
 
 enum {
