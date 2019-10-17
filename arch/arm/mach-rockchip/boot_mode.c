@@ -181,8 +181,8 @@ int toybrick_SnMacAc_check(void) {
 	char vendor_ac[TOYBRICK_AC_LEN + 1]={0};
 	uint8_t sn_mac_ac[TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1]={0};
 	uint8_t sn_mac_ac_sha256[TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1]={0};
-	uint8_t digest[SHA256_SUM_LEN] = {0};
-	uint8_t hash_pre[SHA256_SUM_LEN] = {0};
+	uint8_t digest[SHA256_SUM_LEN+1] = {0};
+	uint8_t hash_pre[SHA256_SUM_LEN+1] = {0};
 	int ret_mac=-1,ret_sn=-1,ret_ac=-1,ret_sn_mac_ac=-1,ret=0;
 	sha256_context ctx;
 
