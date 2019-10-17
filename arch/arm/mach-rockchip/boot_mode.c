@@ -255,7 +255,7 @@ int toybrick_SnMacAc_check(void) {
 		}
 
 		memcpy(vendor_ac,sn_mac_ac_sha256+SHA256_SUM_LEN+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN,TOYBRICK_AC_LEN);
-		ret_ac=vendor_storage_write(TOYBRICK_AC_LEN, vendor_ac, TOYBRICK_AC_LEN);
+		ret_ac=vendor_storage_write(TOYBRICK_ACT_ID, vendor_ac, TOYBRICK_AC_LEN);
 		if (ret_ac <0) {
 			printf("%s write ac fail\n",__FUNCTION__);
 			goto error;
