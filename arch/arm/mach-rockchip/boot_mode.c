@@ -22,7 +22,15 @@
 #endif
 #include <mmc.h>
 #include <console.h>
-
+#include <asm/arch/vendor.h>
+#include <optee_include/OpteeClientInterface.h>
+#include <u-boot/sha256.h>
+#define TOYBRICK_SN_LEN 64
+#define TOYBRICK_MAC_LEN 6
+#define TOYBRICK_AC_LEN 264
+#define TOYBRICK_SN_ID		0x01
+#define TOYBRICK_MAC_ID	0x03
+#define TOYBRICK_ACT_ID	0xa0
 DECLARE_GLOBAL_DATA_PTR;
 
 #if (CONFIG_ROCKCHIP_BOOT_MODE_REG == 0)
@@ -166,6 +174,108 @@ void rockchip_dnl_mode_check(void)
 	}
 }
 
+int toybrick_SnMacAc_check(void) {
+
+	char vendor_sn[TOYBRICK_SN_LEN + 1]={0};
+	char vendor_mac[TOYBRICK_MAC_LEN + 1]={0};
+	char vendor_ac[TOYBRICK_AC_LEN + 1]={0};
+	uint8_t sn_mac_ac[TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1]={0};
+	uint8_t sn_mac_ac_sha256[TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1]={0};
+	uint8_t digest[SHA256_SUM_LEN] = {0};
+	uint8_t hash_pre[SHA256_SUM_LEN] = {0};
+	int ret_mac=-1,ret_sn=-1,ret_ac=-1,ret_sn_mac_ac=-1,ret=0;
+	sha256_context ctx;
+
+	ret_sn = vendor_storage_read(TOYBRICK_SN_ID,(void *)vendor_sn,TOYBRICK_SN_LEN);
+	if (ret_sn!=TOYBRICK_SN_LEN) {
+		printf("%s read sn id fail\n",__FUNCTION__);
+	}
+
+	ret_mac = vendor_storage_read(TOYBRICK_MAC_ID,//MAC
+								(void *)vendor_mac,
+								TOYBRICK_MAC_LEN);
+	if (ret_mac !=TOYBRICK_MAC_LEN) {
+		printf("%s read mac id fail\n",__FUNCTION__);
+	}
+
+	ret_ac = vendor_storage_read(TOYBRICK_ACT_ID,//AC
+								(void *)vendor_ac,
+								TOYBRICK_AC_LEN);
+	if (ret_ac!=TOYBRICK_AC_LEN) {
+		printf("%s read ac id fail\n",__FUNCTION__);
+	}
+
+	ret_sn_mac_ac=trusty_read_toybrick_SnMacAc(sn_mac_ac_sha256,
+											 TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN);
+	if (ret_sn_mac_ac!=0) {
+		printf("%s read sn_mac_ac fail\n",__FUNCTION__);
+	}
+
+	if ( ret_sn==TOYBRICK_SN_LEN && ret_mac==TOYBRICK_MAC_LEN && ret_ac==TOYBRICK_AC_LEN && ret_sn_mac_ac!=0) {
+		printf("%s write rpmb\n",__FUNCTION__);
+		memset(sn_mac_ac,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1);
+		memset(sn_mac_ac_sha256,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1);
+		memcpy(sn_mac_ac,vendor_sn,TOYBRICK_SN_LEN);
+		memcpy(sn_mac_ac+TOYBRICK_SN_LEN,vendor_mac,TOYBRICK_MAC_LEN);
+		memcpy(sn_mac_ac+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN,vendor_ac,TOYBRICK_AC_LEN);
+
+		sha256_starts(&ctx);
+		sha256_update(&ctx,(const uint8_t *)sn_mac_ac,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
+		sha256_finish(&ctx, digest);
+		memcpy(sn_mac_ac_sha256,digest,SHA256_SUM_LEN);
+		memcpy(sn_mac_ac_sha256+SHA256_SUM_LEN,sn_mac_ac,TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
+		ret=trusty_write_toybrick_SnMacAc(sn_mac_ac_sha256,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN);
+		if (ret!=0) {
+			printf("%s trusty_write_toybrick_SnMacAc wrong!\n",__FUNCTION__);
+			goto error;
+		}
+	} else if ((ret_sn!=TOYBRICK_SN_LEN || ret_mac!=TOYBRICK_MAC_LEN || ret_ac!=TOYBRICK_AC_LEN) && ret_sn_mac_ac==0) {
+		printf("%s write vendor\n",__FUNCTION__);
+		memcpy(hash_pre,sn_mac_ac_sha256,SHA256_SUM_LEN);
+		sha256_starts(&ctx);
+		sha256_update(&ctx,(const uint8_t *)sn_mac_ac_sha256+SHA256_SUM_LEN,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
+		sha256_finish(&ctx, digest);
+		if (memcmp(digest, hash_pre, SHA256_SUM_LEN) != 0) {
+			printf("%s get sn_mac_ac wrong!hash error!\n",__FUNCTION__);
+			goto error;
+		}
+
+		memcpy(vendor_sn,sn_mac_ac_sha256+SHA256_SUM_LEN,TOYBRICK_SN_LEN);
+		ret_sn=vendor_storage_write(TOYBRICK_SN_ID, vendor_sn, TOYBRICK_SN_LEN);
+		if (ret_sn <0) {
+			printf("%s write sn fail\n",__FUNCTION__);
+			goto error;
+		}
+
+		memcpy(vendor_mac,sn_mac_ac_sha256+SHA256_SUM_LEN+TOYBRICK_SN_LEN,TOYBRICK_MAC_LEN);
+		ret_mac=vendor_storage_write(TOYBRICK_MAC_ID, vendor_mac, TOYBRICK_MAC_LEN);
+		if (ret_mac <0) {
+			printf("%s write mac fail\n",__FUNCTION__);
+			goto error;
+		}
+
+		memcpy(vendor_ac,sn_mac_ac_sha256+SHA256_SUM_LEN+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN,TOYBRICK_AC_LEN);
+		ret_ac=vendor_storage_write(TOYBRICK_AC_LEN, vendor_ac, TOYBRICK_AC_LEN);
+		if (ret_ac <0) {
+			printf("%s write ac fail\n",__FUNCTION__);
+			goto error;
+		}
+	} else  if ((ret_sn!=TOYBRICK_SN_LEN || ret_mac!=TOYBRICK_MAC_LEN || ret_ac!=TOYBRICK_AC_LEN) && ret_sn_mac_ac!=0) {
+		printf("%s goto loader\n",__FUNCTION__);
+		run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
+		set_back_to_bootrom_dnl_flag();
+		do_reset(NULL, 0, 0, NULL);
+	} else {
+		printf("%s other type\n",__FUNCTION__);
+	}
+	return 0;
+error:
+	run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
+	set_back_to_bootrom_dnl_flag();
+	do_reset(NULL, 0, 0, NULL);
+	return -1;
+}
+
 int setup_boot_mode(void)
 {
 	int boot_mode = BOOT_MODE_NORMAL;
@@ -173,6 +283,7 @@ int setup_boot_mode(void)
 
 	boot_devtype_init();
 	rockchip_dnl_mode_check();
+	toybrick_SnMacAc_check();
 #ifdef CONFIG_RKIMG_BOOTLOADER
 	boot_mode = rockchip_get_boot_mode();
 #endif
