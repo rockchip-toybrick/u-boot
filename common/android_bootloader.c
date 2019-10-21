@@ -184,6 +184,9 @@ static enum android_boot_mode android_bootloader_load_and_clear_mode(
 	if (!strcmp("boot-recovery", bcb.command))
 		return ANDROID_BOOT_MODE_RECOVERY;
 
+	if (!strcmp("boot-fastboot", bcb.command))
+		return ANDROID_BOOT_MODE_RECOVERY;
+
 	return ANDROID_BOOT_MODE_NORMAL;
 }
 
@@ -663,8 +666,7 @@ static AvbSlotVerifyResult android_slot_verify(char *boot_partname,
 		*android_load_address = load_address;
 
 #ifdef CONFIG_ANDROID_BOOT_IMAGE_SEPARATE
-		android_image_load_separate(hdr, NULL,
-					    (void *)load_address, hdr);
+		android_image_memcpy_separate(hdr, (void *)load_address);
 #else
 		memcpy((uint8_t *)load_address,
 		       slot_data[0]->loaded_partitions->data,
@@ -1206,6 +1208,10 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 	ret = android_image_get_fdt((void *)load_address, &fdt_addr);
 	if (!ret)
 		env_set_hex("fdt_addr", fdt_addr);
+#endif
+#ifdef CONFIG_OPTEE_CLIENT
+	if (trusty_notify_optee_uboot_end())
+		printf("Close optee client failed!\n");
 #endif
 	android_bootloader_boot_kernel(load_address);
 
