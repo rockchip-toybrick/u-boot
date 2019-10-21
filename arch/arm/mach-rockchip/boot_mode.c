@@ -211,7 +211,7 @@ int toybrick_SnMacAc_check(void) {
 		printf("%s read sn_mac_ac fail\n",__FUNCTION__);
 	}
 
-	if ( ret_sn==TOYBRICK_SN_LEN && ret_mac==TOYBRICK_MAC_LEN && ret_ac==TOYBRICK_AC_LEN && ret_sn_mac_ac!=0) {
+	if (ret_sn==TOYBRICK_SN_LEN && ret_mac==TOYBRICK_MAC_LEN && ret_sn_mac_ac!=0) {
 		printf("%s write rpmb\n",__FUNCTION__);
 		memset(sn_mac_ac,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1);
 		memset(sn_mac_ac_sha256,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1);
@@ -229,7 +229,7 @@ int toybrick_SnMacAc_check(void) {
 			printf("%s trusty_write_toybrick_SnMacAc wrong!\n",__FUNCTION__);
 			goto error;
 		}
-	} else if ((ret_sn!=TOYBRICK_SN_LEN || ret_mac!=TOYBRICK_MAC_LEN || ret_ac!=TOYBRICK_AC_LEN) && ret_sn_mac_ac==0) {
+	} else if ((ret_sn!=TOYBRICK_SN_LEN || ret_mac!=TOYBRICK_MAC_LEN) && ret_sn_mac_ac==0) {
 		printf("%s write vendor\n",__FUNCTION__);
 		memcpy(hash_pre,sn_mac_ac_sha256,SHA256_SUM_LEN);
 		sha256_starts(&ctx);
@@ -260,7 +260,7 @@ int toybrick_SnMacAc_check(void) {
 			printf("%s write ac fail\n",__FUNCTION__);
 			goto error;
 		}
-	} else  if ((ret_sn!=TOYBRICK_SN_LEN || ret_mac!=TOYBRICK_MAC_LEN || ret_ac!=TOYBRICK_AC_LEN) && ret_sn_mac_ac!=0) {
+	} else  if ((ret_sn!=TOYBRICK_SN_LEN || ret_mac!=TOYBRICK_MAC_LEN ) && ret_sn_mac_ac!=0) {
 		printf("%s goto loader\n",__FUNCTION__);
 		run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
 		set_back_to_bootrom_dnl_flag();
