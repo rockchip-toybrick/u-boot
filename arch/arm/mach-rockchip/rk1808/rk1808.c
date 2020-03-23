@@ -12,6 +12,7 @@
 #include <asm/arch/rk_atags.h>
 #include <asm/gpio.h>
 #include <debug_uart.h>
+#include <asm/arch/vendor.h>
 
 #include <asm/armv8/mmu.h>
 
@@ -136,12 +137,53 @@ static int rockchip_pinctrl_cfg_fdt_fixup(const char *path, u32 new_phandle)
 
 	return 0;
 }
+#define VENDOR_SN_MAX   513
+static int toybrick_tsadc_fdt_fixup(void * blob)
+{
+	int node;
+	int ret;
+	int count;
+	const char *path = "/tsadc";
+	const u32 *data;
+	u32 new_data;
+
+	char sn[VENDOR_SN_MAX];
+
+	ret = vendor_storage_read(VENDOR_SN_ID, sn, (VENDOR_SN_MAX-1));
+	if(ret < 0) {
+		debug("%s: read sn failed\n", __func__);
+		return ret;
+	}
+
+	node = fdt_path_offset(blob, path);
+	if (node < 0) {
+		debug("%s: can't find: %s\n", __func__, path);
+		return node;
+	}
+
+	data = fdt_getprop(blob, node, "rockchip,hw-tshut-polarity", &count);
+	if (!data) {
+		debug("%s: can't find prop \"rockchip,hw-tshut-polarity\"\n", __func__);
+		return -ENODATA;
+	}
+
+	debug("Get hw-tshut-polarity: 0x%x\n", fdt32_to_cpu(data[0]));
+	/* TM0180881911XXXXX Mini-PCIe Cards should set polarity LOW! */
+	if(strncmp(sn, "TM0180881911", 11) == 0) {
+		new_data = 0;
+		fdt_setprop((void *)blob, node, "rockchip,hw-tshut-polarity", &new_data, sizeof(u32));
+	}
+
+	return 0;
+}
 
 int rk_board_fdt_fixup(void *blob)
 {
 	struct tag *t;
 	u32 ph_pu_2ma;
 	int ret = 0;
+
+	toybrick_tsadc_fdt_fixup(blob);
 
 	t = atags_get_tag(ATAG_SOC_INFO);
 	if (!t)
