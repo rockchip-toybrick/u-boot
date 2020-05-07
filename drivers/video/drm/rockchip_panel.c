@@ -55,7 +55,10 @@ struct rockchip_panel_plat {
 		unsigned int init;
 	} delay;
 
+	struct rockchip_panel_cmds *read_cmds;
 	struct rockchip_panel_cmds *on_cmds;
+	struct rockchip_panel_cmds *on_cmds_0;
+	struct rockchip_panel_cmds *on_cmds_1;
 	struct rockchip_panel_cmds *off_cmds;
 };
 
@@ -65,6 +68,7 @@ struct rockchip_panel_priv {
 	struct udevice *power_supply;
 	struct udevice *backlight;
 	struct gpio_desc enable_gpio;
+	struct gpio_desc test_gpio;
 	struct gpio_desc reset_gpio;
 
 	int cmd_type;
@@ -254,6 +258,21 @@ static int rockchip_panel_send_dsi_cmds(struct mipi_dsi_device *dsi,
 	return 0;
 }
 
+static int get_panel_id(struct mipi_dsi_device *dsi, struct rockchip_panel_cmds *cmds)
+{
+	u8 panel_id[1]={0};
+	struct rockchip_cmd_desc *cmd = &cmds->cmds[0];
+
+	mipi_dsi_dcs_read(dsi, *(cmd->payload), panel_id, 1);
+	printf("get panel id 0x%x, wanted id 0x%x\n",
+		panel_id[0], cmd->payload[cmd->header.payload_length-1]);
+	if (cmd->payload[cmd->header.payload_length-1] == panel_id[0])
+		return 0;
+	else
+		return 1;
+}
+
+
 static void panel_simple_prepare(struct rockchip_panel *panel)
 {
 	struct rockchip_panel_plat *plat = dev_get_platdata(panel->dev);
@@ -270,6 +289,9 @@ static void panel_simple_prepare(struct rockchip_panel *panel)
 	if (dm_gpio_is_valid(&priv->enable_gpio))
 		dm_gpio_set_value(&priv->enable_gpio, 1);
 
+	if (dm_gpio_is_valid(&priv->test_gpio))
+		dm_gpio_set_value(&priv->test_gpio, 1);
+
 	if (plat->delay.prepare)
 		mdelay(plat->delay.prepare);
 
@@ -284,6 +306,14 @@ static void panel_simple_prepare(struct rockchip_panel *panel)
 
 	if (plat->delay.init)
 		mdelay(plat->delay.init);
+
+	if (plat->read_cmds) {
+		ret = get_panel_id(dsi, plat->read_cmds);
+		if (ret == 0)
+			plat->on_cmds = plat->on_cmds_0;
+		else if (ret == 1)
+			plat->on_cmds = plat->on_cmds_1;
+	}
 
 	if (plat->on_cmds) {
 		if (priv->cmd_type == CMD_TYPE_SPI)
@@ -332,6 +362,9 @@ static void panel_simple_unprepare(struct rockchip_panel *panel)
 
 	if (priv->power_supply)
 		regulator_set_enable(priv->power_supply, plat->power_invert);
+
+	if (dm_gpio_is_valid(&priv->test_gpio))
+		dm_gpio_set_value(&priv->test_gpio, 0);
 
 	if (plat->delay.unprepare)
 		mdelay(plat->delay.unprepare);
@@ -420,6 +453,45 @@ static int rockchip_panel_ofdata_to_platdata(struct udevice *dev)
 			printf("failed to parse panel init sequence\n");
 			goto free_on_cmds;
 		}
+	} else {
+		data = dev_read_prop(dev, "panel-read-id", &len);
+		if (data) {
+			plat->read_cmds = calloc(1, sizeof(*plat->read_cmds));
+			if (!plat->read_cmds) {
+				return -ENOMEM;
+			}
+
+			ret = rockchip_panel_parse_cmds(data, len, plat->read_cmds);
+			if (ret) {
+				printf("failed to parse panel id\n");
+				goto free_on_cmds;
+			}
+		}
+		data = dev_read_prop(dev, "panel-init-sequence-0", &len);
+		if (data) {
+			plat->on_cmds_0 = calloc(1, sizeof(*plat->on_cmds_0));
+			if (!plat->on_cmds_0)
+				return -ENOMEM;
+
+			ret = rockchip_panel_parse_cmds(data, len, plat->on_cmds_0);
+			if (ret) {
+				printf("failed to parse panel init sequence 0\n");
+				goto free_on_cmds;
+			}
+		}
+		data = dev_read_prop(dev, "panel-init-sequence-1", &len);
+		if (data) {
+			plat->on_cmds_1 = calloc(1, sizeof(*plat->on_cmds_1));
+			if (!plat->on_cmds_1)
+				return -ENOMEM;
+
+			ret = rockchip_panel_parse_cmds(data, len, plat->on_cmds_1);
+			if (ret) {
+				printf("failed to parse panel init sequence 1\n");
+				goto free_on_cmds;
+			}
+		}
+
 	}
 
 	data = dev_read_prop(dev, "panel-exit-sequence", &len);
@@ -460,6 +532,14 @@ static int rockchip_panel_probe(struct udevice *dev)
 		printf("%s: Cannot get enable GPIO: %d\n", __func__, ret);
 		return ret;
 	}
+
+	ret = gpio_request_by_name(dev, "test-gpios", 0,
+				   &priv->test_gpio, GPIOD_IS_OUT);
+	if (ret && ret != -ENOENT) {
+		printf("%s: Cannot get test GPIO: %d\n", __func__, ret);
+		return ret;
+	}
+
 
 	ret = gpio_request_by_name(dev, "reset-gpios", 0,
 				   &priv->reset_gpio, GPIOD_IS_OUT);
