@@ -699,53 +699,32 @@ pack_loader_image()
 
 __pack_32bit_trust_image()
 {
-	local ini=$1 TOS TOS_TA DARM_BASE TEE_LOAD_ADDR TEE_OUTPUT TEE_OFFSET
+    ini=$1
+    tos_image=`sed -n "/TOS=/s/TOS=//p" $ini |tr -d '\r'`                                                                                                                                                      
+    tosta_image=`sed -n "/TOSTA=/s/TOSTA=//p" $ini |tr -d '\r'`
+    tee_output=`sed -n "/OUTPUT=/s/OUTPUT=//p" $ini |tr -d '\r'`
+    if [ "$tee_output" = "" ]; then
+        tee_output="./trust.img"
+    fi
+    tee_offset=`sed -n "/ADDR=/s/ADDR=//p" $ini |tr -d '\r'`
+    if [ "$tee_offset" = "" ]; then
+        tee_offset=0x8400000
+    fi
 
-	if [ ! -f ${ini} ]; then
-		echo "pack trust failed! Can't find: ${ini}"
-		return
-	fi
+    # OP-TEE is 132M(0x8400000) offset from DRAM base.
+    dram_base=`sed -n "/CONFIG_SYS_SDRAM_BASE=/s/CONFIG_SYS_SDRAM_BASE=//p" include/autoconf.mk|tr -d '\r'`
+    tee_load_addr=$((dram_base+tee_offset))
+    tee_load_addr=$(echo "obase=16;${tee_load_addr}"|bc) # Convert Dec to Hex
 
-		cp ${RKTOOLS}/trust_merger ${RKBIN}/${RKTOOLS}/
-		cd ${RKBIN}
-		${RKTOOLS}/trust_merger ${PLATFORM_SHA} ${PLATFORM_RSA} ${PLATFORM_TRUST_IMG_SIZE} ${BIN_PATH_FIXUP} \
-					${PACK_IGNORE_BL32} ${RKBIN}/RKTRUST/${RKCHIP_TRUST}${PLATFORM_AARCH32}TRUST.ini
-	# Parse orignal path
-	TOS=`sed -n "/TOS=/s/TOS=//p" ${ini} |tr -d '\r'`
-	TOS_TA=`sed -n "/TOSTA=/s/TOSTA=//p" ${ini} |tr -d '\r'`
-
-	# Parse address and output name
-	TEE_OUTPUT=`sed -n "/OUTPUT=/s/OUTPUT=//p" ${ini} |tr -d '\r'`
-	if [ "$TEE_OUTPUT" = "" ]; then
-		TEE_OUTPUT="./trust.img"
-	fi
-	TEE_OFFSET=`sed -n "/ADDR=/s/ADDR=//p" ${ini} |tr -d '\r'`
-	if [ "$TEE_OFFSET" = "" ]; then
-		TEE_OFFSET=0x8400000
-	fi
-
-	# OP-TEE is 132M(0x8400000) offset from DRAM base.
-	DARM_BASE=`sed -n "/CONFIG_SYS_SDRAM_BASE=/s/CONFIG_SYS_SDRAM_BASE=//p" ${OUTDIR}/include/autoconf.mk|tr -d '\r'`
-	TEE_LOAD_ADDR=$((DARM_BASE+TEE_OFFSET))
-
-	# Convert Dec to Hex
-	TEE_LOAD_ADDR=$(echo "obase=16;${TEE_LOAD_ADDR}"|bc)
-
-	# Replace "./tools/rk_tools/" with "./" to compatible legacy ini content of rkdevelop branch
-	TOS=$(echo ${TOS} | sed "s/tools\/rk_tools\//\.\//g")
-	TOS_TA=$(echo ${TOS_TA} | sed "s/tools\/rk_tools\//\.\//g")
-
-	if [ $TOS_TA ]; then
-		${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${TOS_TA} ${TEE_OUTPUT} ${TEE_LOAD_ADDR} ${PLATFORM_TRUST_IMG_SIZE}
-	elif [ $TOS ]; then
-		${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${TOS}    ${TEE_OUTPUT} ${TEE_LOAD_ADDR} ${PLATFORM_TRUST_IMG_SIZE}
-	else
-		echo "Can't find any tee bin"
-		exit 1
-	fi
-
-	echo "pack trust okay! Input: ${ini}"
-	echo
+    if [ $tosta_image ]; then
+        ${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${tosta_image} ${tee_output} ${tee_load_addr} ${PLATFORM_TRUST_IMG_SIZE}
+    elif [ $tos_image ]; then
+        ${RKTOOLS}/loaderimage --pack --trustos ${RKBIN}/${tos_image}   ${tee_output} ${tee_load_addr} ${PLATFORM_TRUST_IMG_SIZE}
+    else
+        echo "ERROR: No any tee bin"
+        exit 1
+    fi
+    echo "pack trust okay! Input: $ini"
 }
 
 __pack_64bit_trust_image()
