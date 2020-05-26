@@ -284,7 +284,7 @@ int setup_boot_mode(void)
 	boot_devtype_init();
 	rockchip_dnl_mode_check();
 #ifndef CONFIG_ROCKCHIP_RK3288
-	toybrick_SnMacAc_check();
+//	toybrick_SnMacAc_check();
 #endif
 #ifdef CONFIG_RKIMG_BOOTLOADER
 	boot_mode = rockchip_get_boot_mode();
