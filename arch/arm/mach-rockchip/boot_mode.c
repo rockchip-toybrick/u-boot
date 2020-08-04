@@ -212,7 +212,7 @@ int toybrick_SnMacAc_check(void) {
 	}
 
 	if (ret_sn > 0 && ret_mac==TOYBRICK_MAC_LEN && ret_sn_mac_ac!=0) {
-		printf("%s write rpmb\n",__FUNCTION__);
+		printf("Toybrick: backup SN to rpmb partition\n");
 		memset(sn_mac_ac,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1);
 		memset(sn_mac_ac_sha256,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1);
 		memcpy(sn_mac_ac,vendor_sn,TOYBRICK_SN_LEN);
@@ -230,7 +230,7 @@ int toybrick_SnMacAc_check(void) {
 			goto error;
 		}
 	} else if ((ret_sn <=0 || ret_mac!=TOYBRICK_MAC_LEN) && ret_sn_mac_ac==0) {
-		printf("%s write vendor\n",__FUNCTION__);
+		printf("Toybrick: load sn from rpm partition to vendor partition\n");
 		memcpy(hash_pre,sn_mac_ac_sha256,SHA256_SUM_LEN);
 		sha256_starts(&ctx);
 		sha256_update(&ctx,(const uint8_t *)sn_mac_ac_sha256+SHA256_SUM_LEN,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
@@ -261,15 +261,16 @@ int toybrick_SnMacAc_check(void) {
 			goto error;
 		}
 	} else  if ((ret_sn <=0 || ret_mac!=TOYBRICK_MAC_LEN ) && ret_sn_mac_ac!=0) {
-		printf("%s goto loader\n",__FUNCTION__);
+		printf("Toybrick: warn: SN is null or it is NOT toybrick board,  goto loader!\n");
 		run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
 		set_back_to_bootrom_dnl_flag();
 		do_reset(NULL, 0, 0, NULL);
 	} else {
-		printf("%s other type\n",__FUNCTION__);
+		printf("Toybrick: SN(%s) check OK!\n", vendor_sn);
 	}
 	return 0;
 error:
+	printf("Toybrick: error: SN is null or it is NOT toybrick board,  goto loader!\n");
 	run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
 	set_back_to_bootrom_dnl_flag();
 	do_reset(NULL, 0, 0, NULL);
