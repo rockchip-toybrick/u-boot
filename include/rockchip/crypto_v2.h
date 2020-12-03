@@ -8,9 +8,6 @@
 
 #include <asm/io.h>
 
-#define	cache_op_inner(area, addr, size) \
-		flush_cache((unsigned long)addr, (unsigned long)size)
-
 #define	RK_CRYPTO_KEY_ROOT		   0x00010000
 #define	RK_CRYPTO_KEY_PRIVATE		   0x00020000
 #define	RK_CRYPTO_MODE_MASK		   0x0000ffff
@@ -46,9 +43,6 @@ enum rk_hash_algo {
 
 #define	RK_MODE_ENCRYPT			0
 #define	RK_MODE_DECRYPT			1
-
-#define	HASH_MAX_SIZE			8192
-#define	CIPHER_MAX_SIZE			8192
 
 #define	_SBF(s,	v)			((v) <<	(s))
 #define	_BIT(b)				_SBF(b,	1)
@@ -87,6 +81,8 @@ enum rk_hash_algo {
 
 /* Crypto DMA control registers*/
 #define	CRYPTO_DMA_INT_EN		0x0008
+#define	CRYPTO_NOSYNC_LOCKSTEP_INT_EN	_BIT(8)
+#define	CRYPTO_SYNC_LOCKSTEP_INT_EN	_BIT(7)
 #define	CRYPTO_ZERO_ERR_INT_EN		_BIT(6)
 #define	CRYPTO_LIST_ERR_INT_EN		_BIT(5)
 #define	CRYPTO_SRC_ERR_INT_EN		_BIT(4)
@@ -96,6 +92,7 @@ enum rk_hash_algo {
 #define	CRYPTO_LIST_DONE_INT_EN		_BIT(0)
 
 #define	CRYPTO_DMA_INT_ST		0x000C
+#define	CRYPTO_SYNC_LOCKSTEP_INT_ST	_BIT(7)
 #define	CRYPTO_ZERO_LEN_INT_ST		_BIT(6)
 #define	CRYPTO_LIST_ERR_INT_ST		_BIT(5)
 #define	CRYPTO_SRC_ERR_INT_ST		_BIT(4)
@@ -558,42 +555,6 @@ enum rk_hash_algo {
 #define LLI_USER_STRING_ADA		_BIT(3)
 #define LLI_USER_PRIVACY_KEY		_BIT(7)
 #define LLI_USER_ROOT_KEY		_BIT(8)
-
-#define CRYPTO_TRNG_MAX			32
-
-enum endian_mode {
-	BIG_ENDIAN = 0,
-	LITTLE_ENDIAN
-};
-
-enum clk_type {
-	CLK = 0,
-	HCLK
-};
-
-struct crypto_lli_desc {
-	u32 src_addr;
-	u32 src_len;
-	u32 dst_addr;
-	u32 dst_len;
-	u32 user_define;
-	u32 reserve;
-	u32 dma_ctrl;
-	u32 next_addr;
-};
-
-struct rk_hash_ctx {
-	const	u8 *null_hash;	/* when hash is null or length is zero */
-	void	*cur_data_lli;	/* to recored the lli that not computed	*/
-	void	*free_data_lli;	/* free lli that can use for next lli */
-	void	*vir_src_addr;	/* virt addr for hash src data*/
-	u32	magic;		/* to check whether the ctx is correct */
-	u32	algo;		/* hash algo */
-	u32	digest_size;	/* hash out length according to hash algo*/
-	u32	dma_started;	/* choose use start or restart */
-};
-
-#define	RK_HASH_CTX_MAGIC		0x1A1A1A1A
 
 extern fdt_addr_t crypto_base;
 

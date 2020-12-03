@@ -37,8 +37,14 @@ static int rkusb_write_sector(struct ums *ums_dev,
 {
 	struct blk_desc *block_dev = &ums_dev->block_dev;
 	lbaint_t blkstart = start + ums_dev->start_sector;
+	int ret;
 
-	return blk_dwrite(block_dev, blkstart, blkcnt, buf);
+	if (block_dev->if_type == IF_TYPE_MTD)
+		block_dev->op_flag |= BLK_MTD_CONT_WRITE;
+	ret = blk_dwrite(block_dev, blkstart, blkcnt, buf);
+	if (block_dev->if_type == IF_TYPE_MTD)
+		block_dev->op_flag &= ~(BLK_MTD_CONT_WRITE);
+	return ret;
 }
 
 static int rkusb_erase_sector(struct ums *ums_dev,
@@ -164,9 +170,21 @@ static int do_rkusb(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv[])
 	if (rc < 0)
 		return CMD_RET_FAILURE;
 
+	if (g_rkusb->ums[0].block_dev.if_type == IF_TYPE_MTD &&
+	    g_rkusb->ums[0].block_dev.devnum == BLK_MTD_NAND) {
+#ifdef CONFIG_CMD_GO
+		pr_err("Enter bootrom rockusb...\n");
+		flushc();
+		run_command("rbrom", 0);
+#else
+		pr_err("rockusb: count not support loader upgrade!\n");
+#endif
+	}
+
 	controller_index = (unsigned int)(simple_strtoul(
 				usb_controller,	NULL, 0));
-	if (board_usb_init(controller_index, USB_INIT_DEVICE)) {
+	rc = usb_gadget_initialize(controller_index);
+	if (rc) {
 		pr_err("Couldn't init USB controller.");
 		rc = CMD_RET_FAILURE;
 		goto cleanup_rkusb;
@@ -251,14 +269,14 @@ static int do_rkusb(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv[])
 cleanup_register:
 	g_dnl_unregister();
 cleanup_board:
-	board_usb_cleanup(controller_index, USB_INIT_DEVICE);
+	usb_gadget_release(controller_index);
 cleanup_rkusb:
 	rkusb_fini();
 
 	return rc;
 }
 
-U_BOOT_CMD(rockusb, 4, 1, do_rkusb,
-	   "Use the rockusb Protocol",
-	   "<USB_controller> <devtype> <dev[:part]>  e.g. rockusb 0 mmc 0\n"
+U_BOOT_CMD_ALWAYS(rockusb, 4, 1, do_rkusb,
+		  "Use the rockusb Protocol",
+		  "<USB_controller> <devtype> <dev[:part]>  e.g. rockusb 0 mmc 0\n"
 );

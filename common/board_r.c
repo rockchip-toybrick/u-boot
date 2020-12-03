@@ -129,7 +129,7 @@ static int initr_reloc_global_data(void)
 {
 #ifdef __ARM__
 	monitor_flash_len = _end - __image_copy_start;
-#elif defined(CONFIG_NDS32)
+#elif defined(CONFIG_NDS32) || defined(CONFIG_RISCV)
 	monitor_flash_len = (ulong)&_end - (ulong)&_start;
 #elif !defined(CONFIG_SANDBOX) && !defined(CONFIG_NIOS2)
 	monitor_flash_len = (ulong)&__init_end - gd->relocaddr;
@@ -420,9 +420,11 @@ static int initr_spi(void)
 /* go init the NAND */
 static int initr_nand(void)
 {
+#ifndef CONFIG_USING_KERNEL_DTB
 	puts("NAND:  ");
 	nand_init();
 	printf("%lu MiB\n", nand_size() / 1024);
+#endif
 	return 0;
 }
 #endif
@@ -446,6 +448,21 @@ static int initr_mmc(void)
 #ifndef CONFIG_USING_KERNEL_DTB
 	puts("MMC:   ");
 	mmc_initialize(gd->bd);
+#endif
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_MTD_BLK
+static int initr_mtd_blk(void)
+{
+#ifndef CONFIG_USING_KERNEL_DTB
+	struct blk_desc *dev_desc;
+
+	puts("mtd_blk:   ");
+	dev_desc = rockchip_get_bootdev();
+	if (dev_desc)
+		mtd_blk_map_partitions(dev_desc);
 #endif
 	return 0;
 }
@@ -493,22 +510,53 @@ static int initr_env(void)
 #endif
 
 #ifdef CONFIG_USING_KERNEL_DTB
+/*
+ * If !defined(CONFIG_ENV_IS_NOWHERE):
+ *
+ * Storage env or kernel dtb load depends on bootdev, while bootdev
+ * depends on env varname: devtype, devnum and rkimg_bootdev, etc.
+ * So we have to use nowhere env firstly and cover the storage env
+ * after it is loaded.
+ *
+ * Providing a minimum and necessary nowhere env for board init to
+ * avoid covering the other varnames in storage env.
+ */
 static int initr_env_nowhere(void)
 {
-#if defined(CONFIG_NEEDS_MANUAL_RELOC)
-	env_reloc();
-	env_htab.change_ok += gd->reloc_off;
-#endif
+#ifdef CONFIG_ENV_IS_NOWHERE
 	set_default_env(NULL);
-
 	return 0;
+#else
+	const char env_minimum[] = {
+		ENV_MEM_LAYOUT_SETTINGS
+#ifdef ENV_MEM_LAYOUT_SETTINGS1
+		ENV_MEM_LAYOUT_SETTINGS1
+#endif
+#ifdef RKIMG_DET_BOOTDEV
+		RKIMG_DET_BOOTDEV
+#endif
+	};
+
+	return set_board_env((char *)env_minimum, ENV_SIZE, 0, true);
+#endif
 }
 
 #if !defined(CONFIG_ENV_IS_NOWHERE)
+/*
+ * storage has been initialized in board_init(), we could switch env
+ * from nowhere to storage, i.e. CONFIG_ENV_IS_IN_xxx=y.
+ */
 static int initr_env_switch(void)
 {
 	ALLOC_CACHE_ALIGN_BUFFER(env_t, env_nowhere, 1);
+	char *data;
 	int ret;
+
+	data = env_get("bootargs");
+	if (data) {
+		env_set("bootargs_tmp", data);
+		env_set("bootargs", NULL);
+	}
 
 	/* Export nowhere env for late use */
 	ret = env_export(env_nowhere);
@@ -521,8 +569,19 @@ static int initr_env_switch(void)
 	initr_env();
 
 	/* Append/override nowhere env to storage env */
-	himport_r(&env_htab, (char *)env_nowhere->data, ENV_SIZE, '\0',
-		  H_NOCLEAR, 0, 0, NULL);
+	set_board_env((char *)env_nowhere->data, ENV_SIZE, H_NOCLEAR, false);
+
+	/*
+	 * Restore nowhere bootargs to append/override the one in env storage.
+	 *
+	 * Without this, the entire "bootargs" in storage env is replaces by
+	 * the one in env_nowhere->data.
+	 */
+	data = env_get("bootargs_tmp");
+	if (data) {
+		env_update("bootargs", data);
+		env_set("bootargs_tmp", NULL);
+	}
 
 	return 0;
 }
@@ -800,10 +859,6 @@ static init_fnc_t init_sequence_r[] = {
 	initr_dm,
 #endif
 
-/*
- * kernel dtb must depends on nowhere to detect boot storage media
- * and initialize it.
- */
 #ifdef CONFIG_USING_KERNEL_DTB
 	initr_env_nowhere,
 #endif
@@ -811,14 +866,10 @@ static init_fnc_t init_sequence_r[] = {
 	board_early_init_r,
 #endif
 
-#if defined(CONFIG_ARM) || defined(CONFIG_NDS32)
+#if defined(CONFIG_ARM) || defined(CONFIG_NDS32) || defined(CONFIG_RISCV)
 	board_init,	/* Setup chipselects */
 #endif
 
-/*
- * Now that storage has been initialized in board_init(), we could switch env
- * from nowhere to storage, i.e. CONFIG_ENV_IS_IN_xxx=y.
- */
 #if defined(CONFIG_USING_KERNEL_DTB) && !defined(CONFIG_ENV_IS_NOWHERE)
 	initr_env_switch,
 #endif
@@ -880,6 +931,9 @@ static init_fnc_t init_sequence_r[] = {
 #endif
 #ifdef CONFIG_CMD_ONENAND
 	initr_onenand,
+#endif
+#ifdef CONFIG_MTD_BLK
+	initr_mtd_blk,
 #endif
 #ifdef CONFIG_MMC
 	initr_mmc,

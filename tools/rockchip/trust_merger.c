@@ -324,8 +324,8 @@ static bool parseOpts(void)
 		} else if (buf[0] == '#') {
 			continue;
 		} else {
-			LOGE("unknown sec: %s!\n", buf);
-			goto end;
+			LOGD("unknown sec: %s!\n", buf);
+			continue;
 		}
 		if (SCANF_EAT(file) != 0) {
 			goto end;
@@ -606,6 +606,7 @@ static bool mergetrust(void)
 		pComponent->ComponentID = pEntry->id;
 		pComponent->StorageAddr = (OutFileSize >> 9);
 		pComponent->ImageSize = (pEntry->align_size >> 9);
+		pComponentData->LoadSize = pComponent->ImageSize;
 
 		LOGD("bl3%c: LoadAddr = 0x%08x, StorageAddr = %d, ImageSize = %d\n",
 		     (char)((pEntry->id & 0xFF000000) >> 24), pComponentData->LoadAddr,

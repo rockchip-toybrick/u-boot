@@ -27,6 +27,9 @@
 #define RK1808_GRF_PD_VO_CON1		0x0444
 #define RK1808_RGB_DATA_SYNC_BYPASS(v)	HIWORD_UPDATE(v, 3, 3)
 
+#define RV1126_GRF_IOFUNC_CON3          0x1026c
+#define RV1126_LCDC_IO_BYPASS(v)        HIWORD_UPDATE(v, 0, 0)
+
 #define RK3288_GRF_SOC_CON6		0x025c
 #define RK3288_LVDS_LCDC_SEL(v)		HIWORD_UPDATE(v,  3,  3)
 #define RK3288_GRF_SOC_CON7		0x0260
@@ -42,14 +45,14 @@
 struct rockchip_rgb;
 
 struct rockchip_rgb_funcs {
-	void (*enable)(struct rockchip_rgb *rgb, int pipe);
-	void (*disable)(struct rockchip_rgb *rgb);
+	void (*prepare)(struct rockchip_rgb *rgb, int pipe);
+	void (*unprepare)(struct rockchip_rgb *rgb);
 };
 
 struct rockchip_rgb {
 	struct udevice *dev;
 	struct regmap *grf;
-	bool data_sync;
+	bool data_sync_bypass;
 	struct rockchip_phy *phy;
 	const struct rockchip_rgb_funcs *funcs;
 };
@@ -61,7 +64,7 @@ static inline struct rockchip_rgb *state_to_rgb(struct display_state *state)
 	return dev_get_priv(conn_state->dev);
 }
 
-static int rockchip_rgb_connector_enable(struct display_state *state)
+static int rockchip_rgb_connector_prepare(struct display_state *state)
 {
 	struct rockchip_rgb *rgb = state_to_rgb(state);
 	struct crtc_state *crtc_state = &state->crtc_state;
@@ -70,8 +73,8 @@ static int rockchip_rgb_connector_enable(struct display_state *state)
 
 	pinctrl_select_state(rgb->dev, "default");
 
-	if (rgb->funcs && rgb->funcs->enable)
-		rgb->funcs->enable(rgb, pipe);
+	if (rgb->funcs && rgb->funcs->prepare)
+		rgb->funcs->prepare(rgb, pipe);
 
 	if (rgb->phy) {
 		ret = rockchip_phy_set_mode(rgb->phy, PHY_MODE_VIDEO_TTL);
@@ -86,19 +89,17 @@ static int rockchip_rgb_connector_enable(struct display_state *state)
 	return 0;
 }
 
-static int rockchip_rgb_connector_disable(struct display_state *state)
+static void rockchip_rgb_connector_unprepare(struct display_state *state)
 {
 	struct rockchip_rgb *rgb = state_to_rgb(state);
 
 	if (rgb->phy)
 		rockchip_phy_power_off(rgb->phy);
 
-	if (rgb->funcs && rgb->funcs->disable)
-		rgb->funcs->disable(rgb);
+	if (rgb->funcs && rgb->funcs->unprepare)
+		rgb->funcs->unprepare(rgb);
 
 	pinctrl_select_state(rgb->dev, "sleep");
-
-	return 0;
 }
 
 static int rockchip_rgb_connector_init(struct display_state *state)
@@ -118,6 +119,16 @@ static int rockchip_rgb_connector_init(struct display_state *state)
 	case MEDIA_BUS_FMT_RGB565_1X16:
 		conn_state->output_mode = ROCKCHIP_OUT_MODE_P565;
 		break;
+	case MEDIA_BUS_FMT_SRGB888_3X8:
+	case MEDIA_BUS_FMT_SBGR888_3X8:
+	case MEDIA_BUS_FMT_SRBG888_3X8:
+		conn_state->output_mode = ROCKCHIP_OUT_MODE_S888;
+		break;
+	case MEDIA_BUS_FMT_SRGB888_DUMMY_4X8:
+	case MEDIA_BUS_FMT_SBGR888_DUMMY_4X8:
+	case MEDIA_BUS_FMT_SRBG888_DUMMY_4X8:
+		conn_state->output_mode = ROCKCHIP_OUT_MODE_S888_DUMMY;
+		break;
 	case MEDIA_BUS_FMT_RGB888_1X24:
 	case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
 	default:
@@ -130,8 +141,8 @@ static int rockchip_rgb_connector_init(struct display_state *state)
 
 static const struct rockchip_connector_funcs rockchip_rgb_connector_funcs = {
 	.init = rockchip_rgb_connector_init,
-	.enable = rockchip_rgb_connector_enable,
-	.disable = rockchip_rgb_connector_disable,
+	.prepare = rockchip_rgb_connector_prepare,
+	.unprepare = rockchip_rgb_connector_unprepare,
 };
 
 static int rockchip_rgb_probe(struct udevice *dev)
@@ -143,19 +154,34 @@ static int rockchip_rgb_probe(struct udevice *dev)
 	rgb->dev = dev;
 	rgb->funcs = connector->data;
 	rgb->grf = syscon_get_regmap(dev_get_parent(dev));
-	rgb->data_sync = dev_read_bool(dev, "rockchip,data-sync");
+	rgb->data_sync_bypass = dev_read_bool(dev, "rockchip,data-sync-bypass");
 
 	return 0;
 }
 
-static void px30_rgb_enable(struct rockchip_rgb *rgb, int pipe)
+static void rv1126_rgb_prepare(struct rockchip_rgb *rgb, int pipe)
+{
+	regmap_write(rgb->grf, RV1126_GRF_IOFUNC_CON3,
+		     RV1126_LCDC_IO_BYPASS(rgb->data_sync_bypass));
+}
+
+static const struct rockchip_rgb_funcs rv1126_rgb_funcs = {
+	.prepare = rv1126_rgb_prepare,
+};
+
+static const struct rockchip_connector rv1126_rgb_driver_data = {
+	 .funcs = &rockchip_rgb_connector_funcs,
+	 .data = &rv1126_rgb_funcs,
+};
+
+static void px30_rgb_prepare(struct rockchip_rgb *rgb, int pipe)
 {
 	regmap_write(rgb->grf, PX30_GRF_PD_VO_CON1, PX30_RGB_VOP_SEL(pipe) |
-		     PX30_RGB_DATA_SYNC_BYPASS(!rgb->data_sync));
+		     PX30_RGB_DATA_SYNC_BYPASS(rgb->data_sync_bypass));
 }
 
 static const struct rockchip_rgb_funcs px30_rgb_funcs = {
-	.enable = px30_rgb_enable,
+	.prepare = px30_rgb_prepare,
 };
 
 static const struct rockchip_connector px30_rgb_driver_data = {
@@ -163,14 +189,14 @@ static const struct rockchip_connector px30_rgb_driver_data = {
 	 .data = &px30_rgb_funcs,
 };
 
-static void rk1808_rgb_enable(struct rockchip_rgb *rgb, int pipe)
+static void rk1808_rgb_prepare(struct rockchip_rgb *rgb, int pipe)
 {
 	regmap_write(rgb->grf, RK1808_GRF_PD_VO_CON1,
-		     RK1808_RGB_DATA_SYNC_BYPASS(!rgb->data_sync));
+		     RK1808_RGB_DATA_SYNC_BYPASS(rgb->data_sync_bypass));
 }
 
 static const struct rockchip_rgb_funcs rk1808_rgb_funcs = {
-	.enable = rk1808_rgb_enable,
+	.prepare = rk1808_rgb_prepare,
 };
 
 static const struct rockchip_connector rk1808_rgb_driver_data = {
@@ -178,7 +204,7 @@ static const struct rockchip_connector rk1808_rgb_driver_data = {
 	.data = &rk1808_rgb_funcs,
 };
 
-static void rk3288_rgb_enable(struct rockchip_rgb *rgb, int pipe)
+static void rk3288_rgb_prepare(struct rockchip_rgb *rgb, int pipe)
 {
 	regmap_write(rgb->grf, RK3288_GRF_SOC_CON6, RK3288_LVDS_LCDC_SEL(pipe));
 	regmap_write(rgb->grf, RK3288_GRF_SOC_CON7,
@@ -187,7 +213,7 @@ static void rk3288_rgb_enable(struct rockchip_rgb *rgb, int pipe)
 		     RK3288_LVDS_CON_TTL_EN(1));
 }
 
-static void rk3288_rgb_disable(struct rockchip_rgb *rgb)
+static void rk3288_rgb_unprepare(struct rockchip_rgb *rgb)
 {
 	regmap_write(rgb->grf, RK3288_GRF_SOC_CON7,
 		     RK3288_LVDS_PWRDWN(1) | RK3288_LVDS_CON_ENABLE_2(0) |
@@ -195,8 +221,8 @@ static void rk3288_rgb_disable(struct rockchip_rgb *rgb)
 }
 
 static const struct rockchip_rgb_funcs rk3288_rgb_funcs = {
-	.enable = rk3288_rgb_enable,
-	.disable = rk3288_rgb_disable,
+	.prepare = rk3288_rgb_prepare,
+	.unprepare = rk3288_rgb_unprepare,
 };
 
 static const struct rockchip_connector rk3288_rgb_driver_data = {
@@ -204,13 +230,13 @@ static const struct rockchip_connector rk3288_rgb_driver_data = {
 	.data = &rk3288_rgb_funcs,
 };
 
-static void rk3368_rgb_enable(struct rockchip_rgb *rgb, int pipe)
+static void rk3368_rgb_prepare(struct rockchip_rgb *rgb, int pipe)
 {
 	regmap_write(rgb->grf, RK3368_GRF_SOC_CON15, RK3368_FORCE_JETAG(0));
 }
 
 static const struct rockchip_rgb_funcs rk3368_rgb_funcs = {
-	.enable = rk3368_rgb_enable,
+	.prepare = rk3368_rgb_prepare,
 };
 
 static const struct rockchip_connector rk3368_rgb_driver_data = {
@@ -254,6 +280,10 @@ static const struct udevice_id rockchip_rgb_ids[] = {
 	{
 		.compatible = "rockchip,rv1108-rgb",
 		.data = (ulong)&rockchip_rgb_driver_data,
+	},
+	{
+		.compatible = "rockchip,rv1126-rgb",
+		.data = (ulong)&rv1126_rgb_driver_data,
 	},
 	{}
 };

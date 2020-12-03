@@ -213,6 +213,11 @@ config BOOTARGS
 	  CONFIG_BOOTARGS goes into the environment value "bootargs". Note that
 	  this value will also override the "chosen" node in FDT blob.
 
+config IO_TRACE
+	bool "Enable iotrace"
+	help
+	  This enable iotrace feature.
+
 menu "Console"
 
 config MENU
@@ -250,10 +255,11 @@ config CONSOLE_RECORD_IN_SIZE
 	  The buffer is allocated immediately after the malloc() region is
 	  ready.
 
-config CONSOLE_DISABLE_CTRLC
+config CONSOLE_DISABLE_CLI
 	bool "disable ctrlc"
+	default n
 	help
-	  This disable ctrl+c when CONFIG_BOOTDELAY is 0.
+	  This disable CLI interactive in verified-boot.
 
 config DISABLE_CONSOLE
 	bool "disable console in & out"
@@ -641,32 +647,17 @@ config ANDROID_BOOT_IMAGE
 	  This enables support for booting images which use the Android
 	  image format header.
 
-config ANDROID_BOOT_IMAGE_SEPARATE
-	bool "Enable support for Android image separate loading"
-	depends on ANDROID_BOOT_IMAGE
-	default y
-	help
-	  This enables support for android image separate loading. With this support,
-	  we can load ramdisk/fdt/kernel separate and skip ramdisk and fdt relocation
-	  safely. It saves a lot of boot time.
-
 config ANDROID_BOOT_IMAGE_HASH
 	bool "Enable support for Android image hash verify"
 	depends on ANDROID_BOOT_IMAGE
-	select SHA1
+	select SHA1 if !DM_CRYPTO
 	help
 	  This enables support for Android image hash verify, the mkbootimg always use
 	  SHA1 for images.
 
-config HASH_ROCKCHIP_LEGACY
-	bool "Image hash with Rockchip legacy mkbootimg tool pack"
-	depends on ANDROID_BOOT_IMAGE_HASH
-	help
-	  This option enables adding more android hdr variants into image hash
-	  calculation in legacy rockchip mkbootimg tool.
-
 config SKIP_RELOCATE_UBOOT
 	bool "Skip U-Boot relocation"
+	default y if !ARM64
 	help
 	  This enable support for skipping U-Boot relocation.
 
@@ -696,3 +687,4 @@ config HASH
 endmenu
 
 source "common/spl/Kconfig"
+source "common/usbplug/Kconfig"

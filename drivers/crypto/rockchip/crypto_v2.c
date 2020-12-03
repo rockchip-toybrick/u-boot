@@ -10,8 +10,43 @@
 #include <asm/io.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/clock.h>
+#include <rockchip/crypto_hash_cache.h>
 #include <rockchip/crypto_v2.h>
 #include <rockchip/crypto_v2_pka.h>
+
+#define	RK_HASH_CTX_MAGIC		0x1A1A1A1A
+
+#define CRYPTO_TRNG_MAX			32
+
+enum endian_mode {
+	BIG_ENDIAN = 0,
+	LITTLE_ENDIAN
+};
+
+enum clk_type {
+	CLK = 0,
+	HCLK
+};
+
+struct crypto_lli_desc {
+	u32 src_addr;
+	u32 src_len;
+	u32 dst_addr;
+	u32 dst_len;
+	u32 user_define;
+	u32 reserve;
+	u32 dma_ctrl;
+	u32 next_addr;
+};
+
+struct rk_hash_ctx {
+	struct crypto_lli_desc		data_lli;	/* lli desc */
+	struct crypto_hash_cache	*hash_cache;
+	u32				magic;		/* to check ctx */
+	u32				algo;		/* hash algo */
+	u8				digest_size;	/* hash out length */
+	u8				reserved[3];
+};
 
 struct rockchip_crypto_priv {
 	fdt_addr_t reg;
@@ -21,61 +56,49 @@ struct rockchip_crypto_priv {
 	u32 *frequencies;
 	u32 nclocks;
 	u32 length;
-	void *hw_ctx;
+	struct rk_hash_ctx *hw_ctx;
 };
 
 #define LLI_ADDR_ALIGIN_SIZE	8
 #define DATA_ADDR_ALIGIN_SIZE	8
-#define RK_CRYPTO_TIME_OUT	50000  /* max 50ms */
+#define DATA_LEN_ALIGIN_SIZE	64
+
+/* crypto timeout 500ms, must support more than 32M data per times*/
+#define HASH_UPDATE_LIMIT	(32 * 1024 * 1024)
+#define RK_CRYPTO_TIME_OUT	500000
 
 #define RK_WHILE_TIME_OUT(condition, timeout, ret) { \
 			u32 time_out = timeout; \
+			ret = 0; \
 			while (condition) { \
 				if (time_out-- == 0) { \
-					printf("[%s] %d: time out!", __func__, \
+					debug("[%s] %d: time out!\n", __func__,\
 						__LINE__); \
 					ret = -ETIME; \
 					break; \
 				} \
 				udelay(1); \
 			} \
-			ret = 0; \
 		} while (0)
 
 typedef u32 paddr_t;
 #define virt_to_phys(addr)		(((unsigned long)addr) & 0xffffffff)
 #define phys_to_virt(addr, area)	((unsigned long)addr)
 
-static const u8 null_hash_sha1_value[] = {
-	0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d,
-	0x32, 0x55, 0xbf, 0xef, 0x95, 0x60, 0x18, 0x90,
-	0xaf, 0xd8, 0x07, 0x09
-};
-
-static const u8 null_hash_md5_value[] = {
-	0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04,
-	0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e
-};
-
-static const u8 null_hash_sha256_value[] = {
-	0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
-	0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
-	0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
-	0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55
-};
-
-static const u8 null_hash_sha512_value[] = {
-	0xcf, 0x83, 0xe1, 0x35, 0x7e, 0xef, 0xb8, 0xbd,
-	0xf1, 0x54, 0x28, 0x50, 0xd6, 0x6d, 0x80, 0x07,
-	0xd6, 0x20, 0xe4, 0x05, 0x0b, 0x57, 0x15, 0xdc,
-	0x83, 0xf4, 0xa9, 0x21, 0xd3, 0x6c, 0xe9, 0xce,
-	0x47, 0xd0, 0xd1, 0x3c, 0x5d, 0x85, 0xf2, 0xb0,
-	0xff, 0x83, 0x18, 0xd2, 0x87, 0x7e, 0xec, 0x2f,
-	0x63, 0xb9, 0x31, 0xbd, 0x47, 0x41, 0x7a, 0x81,
-	0xa5, 0x38, 0x32, 0x7a, 0xf9, 0x27, 0xda, 0x3e
-};
-
 fdt_addr_t crypto_base;
+
+static int hw_check_trng_exist(void)
+{
+	u32 tmp = 0, val = 0;
+
+	tmp = crypto_read(CRYPTO_RNG_SAMPLE_CNT);
+	crypto_write(50, CRYPTO_RNG_SAMPLE_CNT);
+
+	val = crypto_read(CRYPTO_RNG_SAMPLE_CNT);
+	crypto_write(tmp, CRYPTO_RNG_SAMPLE_CNT);
+
+	return val;
+}
 
 static void word2byte(u32 word, u8 *ch, u32 endian)
 {
@@ -124,32 +147,20 @@ static int hw_crypto_reset(void)
 	return ret;
 }
 
-static void hw_hash_common_clean_ctx(struct rk_hash_ctx *ctx)
-{
-	crypto_write(CRYPTO_WRITE_MASK_ALL | 0, CRYPTO_HASH_CTL);
-
-	if (ctx->free_data_lli)
-		free(ctx->free_data_lli);
-
-	if (ctx->cur_data_lli)
-		free(ctx->cur_data_lli);
-
-	if (ctx->vir_src_addr)
-		free(ctx->vir_src_addr);
-	memset(ctx, 0x00, sizeof(*ctx));
-}
-
 static void hw_hash_clean_ctx(struct rk_hash_ctx *ctx)
 {
 	/* clear hash status */
 	crypto_write(CRYPTO_WRITE_MASK_ALL | 0, CRYPTO_HASH_CTL);
 
-	/* free tmp buff */
-	if (ctx && ctx->magic == RK_HASH_CTX_MAGIC)
-		hw_hash_common_clean_ctx(ctx);
+	assert(ctx);
+	assert(ctx->magic == RK_HASH_CTX_MAGIC);
+
+	crypto_hash_cache_free(ctx->hash_cache);
+
+	memset(ctx, 0x00, sizeof(*ctx));
 }
 
-int rk_hash_init(void *hw_ctx, u32 algo)
+static int rk_hash_init(void *hw_ctx, u32 algo)
 {
 	struct rk_hash_ctx *tmp_ctx = (struct rk_hash_ctx *)hw_ctx;
 	u32 reg_ctrl = 0;
@@ -158,29 +169,32 @@ int rk_hash_init(void *hw_ctx, u32 algo)
 	if (!tmp_ctx)
 		return -EINVAL;
 
-	memset(tmp_ctx, 0x00, sizeof(*tmp_ctx));
+	reg_ctrl = CRYPTO_SW_CC_RESET;
+	crypto_write(reg_ctrl | (reg_ctrl << CRYPTO_WRITE_MASK_SHIFT),
+		     CRYPTO_RST_CTL);
 
+	/* wait reset compelete */
+	RK_WHILE_TIME_OUT(crypto_read(CRYPTO_RST_CTL),
+			  RK_CRYPTO_TIME_OUT, ret);
+
+	reg_ctrl = 0;
 	tmp_ctx->algo = algo;
 	switch (algo) {
 	case CRYPTO_MD5:
 		reg_ctrl |= CRYPTO_MODE_MD5;
 		tmp_ctx->digest_size = 16;
-		tmp_ctx->null_hash = null_hash_md5_value;
 		break;
 	case CRYPTO_SHA1:
 		reg_ctrl |= CRYPTO_MODE_SHA1;
 		tmp_ctx->digest_size = 20;
-		tmp_ctx->null_hash = null_hash_sha1_value;
 		break;
 	case CRYPTO_SHA256:
 		reg_ctrl |= CRYPTO_MODE_SHA256;
 		tmp_ctx->digest_size = 32;
-		tmp_ctx->null_hash = null_hash_sha256_value;
 		break;
 	case CRYPTO_SHA512:
 		reg_ctrl |= CRYPTO_MODE_SHA512;
 		tmp_ctx->digest_size = 64;
-		tmp_ctx->null_hash = null_hash_sha512_value;
 		break;
 
 	default:
@@ -199,8 +213,8 @@ int rk_hash_init(void *hw_ctx, u32 algo)
 	reg_ctrl = CRYPTO_DOUT_BYTESWAP | CRYPTO_DOIN_BYTESWAP;
 	crypto_write(reg_ctrl | CRYPTO_WRITE_MASK_ALL, CRYPTO_FIFO_CTL);
 
-	/* disable all interrupt */
-	crypto_write(0x0, CRYPTO_DMA_INT_EN);
+	/* enable src_item_done interrupt */
+	crypto_write(CRYPTO_SRC_ITEM_INT_EN, CRYPTO_DMA_INT_EN);
 
 	tmp_ctx->magic = RK_HASH_CTX_MAGIC;
 
@@ -212,138 +226,96 @@ exit:
 	return ret;
 }
 
+static int rk_hash_direct_calc(void *hw_data, const u8 *data,
+			       u32 data_len, u8 *started_flag, u8 is_last)
+{
+	struct rockchip_crypto_priv *priv = hw_data;
+	struct rk_hash_ctx *hash_ctx = priv->hw_ctx;
+	struct crypto_lli_desc *lli = &hash_ctx->data_lli;
+	int ret = -EINVAL;
+	u32 tmp = 0, mask = 0;
+
+	assert(IS_ALIGNED((ulong)data, DATA_ADDR_ALIGIN_SIZE));
+	assert(is_last || IS_ALIGNED(data_len, DATA_LEN_ALIGIN_SIZE));
+
+	debug("%s: data = %p, len = %u, s = %x, l = %x\n",
+	      __func__, data, data_len, *started_flag, is_last);
+
+	memset(lli, 0x00, sizeof(*lli));
+	lli->src_addr = (u32)virt_to_phys(data);
+	lli->src_len = data_len;
+	lli->dma_ctrl = LLI_DMA_CTRL_SRC_DONE;
+
+	if (is_last) {
+		lli->user_define |= LLI_USER_STRING_LAST;
+		lli->dma_ctrl |= LLI_DMA_CTRL_LAST;
+	} else {
+		lli->next_addr = (u32)virt_to_phys(lli);
+		lli->dma_ctrl |= LLI_DMA_CTRL_PAUSE;
+	}
+
+	if (!(*started_flag)) {
+		lli->user_define |=
+			(LLI_USER_STRING_START | LLI_USER_CPIHER_START);
+		crypto_write((u32)virt_to_phys(lli), CRYPTO_DMA_LLI_ADDR);
+		crypto_write((CRYPTO_HASH_ENABLE << CRYPTO_WRITE_MASK_SHIFT) |
+			     CRYPTO_HASH_ENABLE, CRYPTO_HASH_CTL);
+		tmp = CRYPTO_DMA_START;
+		*started_flag = 1;
+	} else {
+		tmp = CRYPTO_DMA_RESTART;
+	}
+
+	/* flush cache */
+	crypto_flush_cacheline((ulong)lli, sizeof(*lli));
+	crypto_flush_cacheline((ulong)data, data_len);
+
+	/* start calculate */
+	crypto_write(tmp << CRYPTO_WRITE_MASK_SHIFT | tmp,
+		     CRYPTO_DMA_CTL);
+
+	/* mask CRYPTO_SYNC_LOCKSTEP_INT_ST flag */
+	mask = ~(mask | CRYPTO_SYNC_LOCKSTEP_INT_ST);
+
+	/* wait calc ok */
+	RK_WHILE_TIME_OUT(!(crypto_read(CRYPTO_DMA_INT_ST) & mask),
+			  RK_CRYPTO_TIME_OUT, ret);
+
+	/* clear interrupt status */
+	tmp = crypto_read(CRYPTO_DMA_INT_ST);
+	crypto_write(tmp, CRYPTO_DMA_INT_ST);
+
+	if (tmp != CRYPTO_SRC_ITEM_DONE_INT_ST &&
+	    tmp != CRYPTO_ZERO_LEN_INT_ST) {
+		debug("[%s] %d: CRYPTO_DMA_INT_ST = 0x%x\n",
+		      __func__, __LINE__, tmp);
+		goto exit;
+	}
+
+	priv->length += data_len;
+exit:
+	return ret;
+}
+
 int rk_hash_update(void *ctx, const u8 *data, u32 data_len)
 {
 	struct rk_hash_ctx *tmp_ctx = (struct rk_hash_ctx *)ctx;
-	struct crypto_lli_desc *free_lli_desp = NULL;
-	struct crypto_lli_desc *lli_desp = NULL;
-	u32 tmp, temp_data_len = 0;
-	u8 *vir_src_addr = NULL;
 	int ret = -EINVAL;
 
+	debug("\n");
 	if (!tmp_ctx || !data)
-		goto error;
+		goto exit;
 
 	if (tmp_ctx->digest_size == 0 || tmp_ctx->magic != RK_HASH_CTX_MAGIC)
-		goto error;
+		goto exit;
 
-	/* update will keep cache one calculate request in memmory */
-	/* because last calculate request should calculate in final */
-	if (!tmp_ctx->cur_data_lli) {
-		lli_desp = (struct crypto_lli_desc *)
-				memalign(DATA_ADDR_ALIGIN_SIZE,
-					 sizeof(struct crypto_lli_desc));
-		if (!lli_desp)
-			goto error;
+	ret = crypto_hash_update_with_cache(tmp_ctx->hash_cache,
+					    data, data_len);
 
-		free_lli_desp = (struct crypto_lli_desc *)
-				memalign(DATA_ADDR_ALIGIN_SIZE,
-					 sizeof(struct crypto_lli_desc));
-		if (!free_lli_desp) {
-			free(lli_desp);
-			goto error;
-		}
-
-		memset(lli_desp, 0x00, sizeof(*lli_desp));
-		vir_src_addr = (u8 *)memalign(DATA_ADDR_ALIGIN_SIZE,
-						HASH_MAX_SIZE);
-		if (!vir_src_addr) {
-			free(lli_desp);
-			free(free_lli_desp);
-			printf("[%s] %d: memalign fail!", __func__, __LINE__);
-			goto error;
-		}
-
-		lli_desp->src_addr = (u32)virt_to_phys(vir_src_addr);
-		lli_desp->user_define = LLI_USER_CPIHER_START |
-					LLI_USER_STRING_START;
-		tmp_ctx->cur_data_lli = lli_desp;
-		tmp_ctx->free_data_lli = free_lli_desp;
-		tmp_ctx->vir_src_addr = vir_src_addr;
-
-		/* write first lli dma address to reg */
-		crypto_write((u32)virt_to_phys(tmp_ctx->cur_data_lli),
-			     CRYPTO_DMA_LLI_ADDR);
-	}
-
-	ret = 0;
-	while (data_len) {
-		lli_desp = (struct crypto_lli_desc *)tmp_ctx->cur_data_lli;
-		vir_src_addr = (u8 *)phys_to_virt((paddr_t)lli_desp->src_addr,
-						MEM_AREA_TEE_RAM);
-		if (data_len + lli_desp->src_len > HASH_MAX_SIZE) {
-			temp_data_len = HASH_MAX_SIZE - lli_desp->src_len;
-			memcpy(vir_src_addr + lli_desp->src_len, data,
-			       temp_data_len);
-			data_len -= temp_data_len;
-			data += temp_data_len;
-
-			free_lli_desp = tmp_ctx->free_data_lli;
-
-			memset(free_lli_desp, 0x00, sizeof(*free_lli_desp));
-			lli_desp->src_len = HASH_MAX_SIZE;
-			lli_desp->next_addr = (u32)virt_to_phys(free_lli_desp);
-			/* item done and  pause */
-			lli_desp->dma_ctrl = LLI_DMA_CTRL_PAUSE |
-					     LLI_DMA_CTRL_SRC_DONE;
-
-			if (tmp_ctx->dma_started == 0) {
-				/* start calculate */
-				crypto_write((CRYPTO_HASH_ENABLE <<
-						CRYPTO_WRITE_MASK_SHIFT) |
-						CRYPTO_HASH_ENABLE,
-						CRYPTO_HASH_CTL);
-				tmp = CRYPTO_DMA_START;
-				tmp_ctx->dma_started = 1;
-			} else {
-				/* restart calculate */
-				tmp = CRYPTO_DMA_RESTART;
-			}
-
-			/* flush cache */
-			cache_op_inner(DCACHE_AREA_CLEAN, lli_desp,
-				       sizeof(*lli_desp));
-			cache_op_inner(DCACHE_AREA_CLEAN, vir_src_addr,
-				       lli_desp->src_len);
-
-			/* start calculate */
-			crypto_write(tmp << CRYPTO_WRITE_MASK_SHIFT | tmp,
-				     CRYPTO_DMA_CTL);
-
-			/* wait calc ok */
-			RK_WHILE_TIME_OUT(!crypto_read(CRYPTO_DMA_INT_ST),
-					  RK_CRYPTO_TIME_OUT, ret);
-
-			/* clear interrupt status */
-			tmp = crypto_read(CRYPTO_DMA_INT_ST);
-			crypto_write(tmp, CRYPTO_DMA_INT_ST);
-
-			if (tmp != CRYPTO_SRC_ITEM_DONE_INT_ST &&
-			    tmp != CRYPTO_ZERO_LEN_INT_ST) {
-				printf("[%s] %d: CRYPTO_DMA_INT_ST = 0x%x",
-				       __func__, __LINE__, tmp);
-				goto error;
-			}
-
-			/* after calc one block, swap free lli and cur lli */
-			free_lli_desp->src_addr = lli_desp->src_addr;
-			tmp_ctx->free_data_lli = tmp_ctx->cur_data_lli;
-			tmp_ctx->cur_data_lli = free_lli_desp;
-			free_lli_desp = NULL;
-		} else {
-			/* cache first calculate request to buff */
-			memcpy(vir_src_addr + lli_desp->src_len,
-			       data, data_len);
-			lli_desp->src_len += data_len;
-			data_len = 0;
-		}
-	}
-
-	return ret;
-
-error:
+exit:
 	/* free lli list */
-	hw_hash_clean_ctx(tmp_ctx);
+	if (ret)
+		hw_hash_clean_ctx(tmp_ctx);
 
 	return ret;
 }
@@ -351,63 +323,16 @@ error:
 int rk_hash_final(void *ctx, u8 *digest, size_t len)
 {
 	struct rk_hash_ctx *tmp_ctx = (struct rk_hash_ctx *)ctx;
-	struct crypto_lli_desc *lli_desp = NULL;
 	int ret = -EINVAL;
-	u32 i, tmp;
+	u32 i;
 
 	if (!digest)
 		goto exit;
 
 	if (!tmp_ctx ||
-	    !tmp_ctx->cur_data_lli ||
 	    tmp_ctx->digest_size == 0 ||
 	    len > tmp_ctx->digest_size ||
 	    tmp_ctx->magic != RK_HASH_CTX_MAGIC) {
-		goto exit;
-	}
-
-	/* to find the last block */
-	lli_desp = (struct crypto_lli_desc *)tmp_ctx->cur_data_lli;
-	if (lli_desp->next_addr != 0)
-		goto exit;
-
-	/* if data len is zero, return null hash value immediately*/
-	if (tmp_ctx->dma_started == 0 &&
-	    lli_desp->src_len == 0 &&
-	    !tmp_ctx->null_hash) {
-		memcpy(digest, tmp_ctx->null_hash, len);
-		ret = 0;
-		goto exit;
-	}
-
-	/* set LLI_USER_STRING_LAST to tell crypto this block is last one */
-	lli_desp->user_define |= LLI_USER_STRING_LAST;
-	lli_desp->dma_ctrl = LLI_DMA_CTRL_LIST_DONE | LLI_DMA_CTRL_LAST;
-	cache_op_inner(DCACHE_AREA_CLEAN, lli_desp, sizeof(*lli_desp));
-	cache_op_inner(DCACHE_AREA_CLEAN, tmp_ctx->vir_src_addr,
-		       lli_desp->src_len);
-
-	if (tmp_ctx->dma_started == 0) {
-		crypto_write((CRYPTO_HASH_ENABLE << CRYPTO_WRITE_MASK_SHIFT) |
-				CRYPTO_HASH_ENABLE, CRYPTO_HASH_CTL);
-		crypto_write((CRYPTO_DMA_START << CRYPTO_WRITE_MASK_SHIFT) |
-				CRYPTO_DMA_START, CRYPTO_DMA_CTL);
-	} else {
-		crypto_write((CRYPTO_DMA_RESTART << CRYPTO_WRITE_MASK_SHIFT) |
-				CRYPTO_DMA_RESTART, CRYPTO_DMA_CTL);
-		tmp_ctx->dma_started = 1;
-	}
-
-	/* wait dma trans ok */
-	RK_WHILE_TIME_OUT(!crypto_read(CRYPTO_DMA_INT_ST),
-			  RK_CRYPTO_TIME_OUT, ret);
-
-	/* clear interrupt status */
-	tmp = crypto_read(CRYPTO_DMA_INT_ST);
-	crypto_write(tmp, CRYPTO_DMA_INT_ST);
-
-	if (tmp != CRYPTO_LIST_DONE_INT_ST) {
-		ret = -EIO;
 		goto exit;
 	}
 
@@ -432,8 +357,6 @@ int rk_hash_final(void *ctx, u8 *digest, size_t len)
 	crypto_write(CRYPTO_WRITE_MASK_ALL | 0, CRYPTO_HASH_CTL);
 
 exit:
-	/* free lli list */
-	hw_hash_clean_ctx(tmp_ctx);
 
 	return ret;
 }
@@ -476,43 +399,71 @@ static int rk_trng(u8 *trng, u32 len)
 
 static u32 rockchip_crypto_capability(struct udevice *dev)
 {
-	return CRYPTO_MD5 |
+	u32 val = 0;
+
+	val =  CRYPTO_MD5 |
 	       CRYPTO_SHA1 |
 	       CRYPTO_SHA256 |
+#if !defined(CONFIG_ROCKCHIP_RK1808)
 	       CRYPTO_SHA512 |
+#endif
 	       CRYPTO_RSA512 |
 	       CRYPTO_RSA1024 |
 	       CRYPTO_RSA2048 |
 	       CRYPTO_RSA3072 |
-	       CRYPTO_RSA4096 |
-	       CRYPTO_TRNG;
+	       CRYPTO_RSA4096;
+
+	if (hw_check_trng_exist())
+		val |= CRYPTO_TRNG;
+
+	return val;
 }
 
 static int rockchip_crypto_sha_init(struct udevice *dev, sha_context *ctx)
 {
 	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
+	struct rk_hash_ctx *hash_ctx = priv->hw_ctx;
 
 	if (!ctx)
 		return -EINVAL;
 
-	priv->hw_ctx = malloc(sizeof(struct rk_hash_ctx));
-	if (!priv->hw_ctx)
-		return -ENOMEM;
+	memset(hash_ctx, 0x00, sizeof(*hash_ctx));
 
-	memset(priv->hw_ctx, 0x00, sizeof(struct rk_hash_ctx));
+	priv->length = 0;
 
-	return rk_hash_init(priv->hw_ctx, ctx->algo);
+	hash_ctx->hash_cache = crypto_hash_cache_alloc(rk_hash_direct_calc,
+						       priv, ctx->length,
+						       DATA_ADDR_ALIGIN_SIZE,
+						       DATA_LEN_ALIGIN_SIZE);
+	if (!hash_ctx->hash_cache)
+		return -EFAULT;
+
+	return rk_hash_init(hash_ctx, ctx->algo);
 }
 
 static int rockchip_crypto_sha_update(struct udevice *dev,
 				      u32 *input, u32 len)
 {
 	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
+	int ret, i;
+	u8 *p;
 
 	if (!len)
 		return -EINVAL;
 
-	return rk_hash_update(priv->hw_ctx, (u8 *)input, len);
+	p = (u8 *)input;
+
+	for (i = 0; i < len / HASH_UPDATE_LIMIT; i++, p += HASH_UPDATE_LIMIT) {
+		ret = rk_hash_update(priv->hw_ctx, p, HASH_UPDATE_LIMIT);
+		if (ret)
+			goto exit;
+	}
+
+	if (len % HASH_UPDATE_LIMIT)
+		ret = rk_hash_update(priv->hw_ctx, p, len % HASH_UPDATE_LIMIT);
+
+exit:
+	return ret;
 }
 
 static int rockchip_crypto_sha_final(struct udevice *dev,
@@ -524,15 +475,21 @@ static int rockchip_crypto_sha_final(struct udevice *dev,
 
 	nbits = crypto_algo_nbits(ctx->algo);
 
-	ret = rk_hash_final(priv->hw_ctx, (u8 *)output, BITS2BYTE(nbits));
-	if (priv->hw_ctx) {
-		free(priv->hw_ctx);
-		priv->hw_ctx = 0;
+	if (priv->length != ctx->length) {
+		printf("total length(0x%08x) != init length(0x%08x)!\n",
+		       priv->length, ctx->length);
+		ret = -EIO;
+		goto exit;
 	}
 
+	ret = rk_hash_final(priv->hw_ctx, (u8 *)output, BITS2BYTE(nbits));
+
+exit:
+	hw_hash_clean_ctx(priv->hw_ctx);
 	return ret;
 }
 
+#if CONFIG_IS_ENABLED(ROCKCHIP_RSA)
 static int rockchip_crypto_rsa_verify(struct udevice *dev, rsa_key *ctx,
 				      u8 *sign, u8 *output)
 {
@@ -595,6 +552,13 @@ exit:
 
 	return ret;
 }
+#else
+static int rockchip_crypto_rsa_verify(struct udevice *dev, rsa_key *ctx,
+				      u8 *sign, u8 *output)
+{
+	return -ENOSYS;
+}
+#endif
 
 static int rockchip_crypto_get_trng(struct udevice *dev, u8 *output, u32 len)
 {
@@ -696,6 +660,11 @@ static int rockchip_crypto_probe(struct udevice *dev)
 	int i, ret = 0;
 	u32* clocks;
 
+	priv->hw_ctx = memalign(LLI_ADDR_ALIGIN_SIZE,
+				sizeof(struct rk_hash_ctx));
+	if (!priv->hw_ctx)
+		return -ENOMEM;
+
 	ret = rockchip_get_clk(&priv->clk.dev);
 	if (ret) {
 		printf("Failed to get clk device, ret=%d\n", ret);
@@ -722,6 +691,8 @@ static const struct udevice_id rockchip_crypto_ids[] = {
 	{ .compatible = "rockchip,px30-crypto" },
 	{ .compatible = "rockchip,rk1808-crypto" },
 	{ .compatible = "rockchip,rk3308-crypto" },
+	{ .compatible = "rockchip,rv1126-crypto" },
+	{ .compatible = "rockchip,rk3568-crypto" },
 	{ }
 };
 

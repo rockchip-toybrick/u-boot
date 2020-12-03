@@ -13,8 +13,8 @@
 #include <linux/mtd/spinand.h>
 
 #define SPINAND_MFR_GIGADEVICE			0xC8
-#define GD5FXGQ4XA_STATUS_ECC_1_7_BITFLIPS	(1 << 4)
-#define GD5FXGQ4XA_STATUS_ECC_8_BITFLIPS	(3 << 4)
+#define GD5FXGQ4XA_STATUS_ECC_BELOW_BITFLIPS	(1 << 4)
+#define GD5FXGQ4XA_STATUS_ECC_MAX_BITFLIPS	(3 << 4)
 
 #define GD5FXGQ4XEXXG_REG_STATUS2		0xf0
 
@@ -59,7 +59,7 @@ static int gd5fxgq4xexxg_ooblayout_free(struct mtd_info *mtd, int section,
 	return 0;
 }
 
-static int gd5fxgq4xexxg_ecc_get_status(struct spinand_device *spinand,
+static int gd5f1gq4xexxg_ecc_get_status(struct spinand_device *spinand,
 					u8 status)
 {
 	u8 status2;
@@ -71,7 +71,7 @@ static int gd5fxgq4xexxg_ecc_get_status(struct spinand_device *spinand,
 	case STATUS_ECC_NO_BITFLIPS:
 		return 0;
 
-	case GD5FXGQ4XA_STATUS_ECC_1_7_BITFLIPS:
+	case GD5FXGQ4XA_STATUS_ECC_BELOW_BITFLIPS:
 		/*
 		 * Read status2 register to determine a more fine grained
 		 * bit error status
@@ -88,8 +88,50 @@ static int gd5fxgq4xexxg_ecc_get_status(struct spinand_device *spinand,
 		return ((status & STATUS_ECC_MASK) >> 2) |
 			((status2 & STATUS_ECC_MASK) >> 4);
 
-	case GD5FXGQ4XA_STATUS_ECC_8_BITFLIPS:
+	case GD5FXGQ4XA_STATUS_ECC_MAX_BITFLIPS:
 		return 8;
+
+	case STATUS_ECC_UNCOR_ERROR:
+		return -EBADMSG;
+
+	default:
+		break;
+	}
+
+	return -EINVAL;
+}
+
+static int gd5fxgq5xexxg_ecc_get_status(struct spinand_device *spinand,
+					u8 status)
+{
+	u8 status2;
+	struct spi_mem_op op = SPINAND_GET_FEATURE_OP(GD5FXGQ4XEXXG_REG_STATUS2,
+						      &status2);
+	int ret;
+
+	switch (status & STATUS_ECC_MASK) {
+	case STATUS_ECC_NO_BITFLIPS:
+		return 0;
+
+	case GD5FXGQ4XA_STATUS_ECC_BELOW_BITFLIPS:
+		/*
+		 * Read status2 register to determine a more fine grained
+		 * bit error status
+		 */
+		ret = spi_mem_exec_op(spinand->slave, &op);
+		if (ret)
+			return ret;
+
+		/*
+		 * 4 ... 7 bits are flipped (1..4 can't be detected, so
+		 * report the maximum of 4 in this case
+		 */
+		/* bits sorted this way (3...0): ECCS1,ECCS0,ECCSE1,ECCSE0 */
+		return (((status & STATUS_ECC_MASK) >> 2) |
+			((status2 & STATUS_ECC_MASK) >> 4)) - 3;
+
+	case GD5FXGQ4XA_STATUS_ECC_MAX_BITFLIPS:
+		return -EBADMSG;
 
 	case STATUS_ECC_UNCOR_ERROR:
 		return -EBADMSG;
@@ -103,7 +145,7 @@ static int gd5fxgq4xexxg_ecc_get_status(struct spinand_device *spinand,
 
 static const struct mtd_ooblayout_ops gd5fxgq4xexxg_ooblayout = {
 	.ecc = gd5fxgq4xexxg_ooblayout_ecc,
-	.free = gd5fxgq4xexxg_ooblayout_free,
+	.rfree = gd5fxgq4xexxg_ooblayout_free,
 };
 
 static const struct spinand_info gigadevice_spinand_table[] = {
@@ -115,7 +157,34 @@ static const struct spinand_info gigadevice_spinand_table[] = {
 					      &update_cache_variants),
 		     SPINAND_HAS_QE_BIT,
 		     SPINAND_ECCINFO(&gd5fxgq4xexxg_ooblayout,
-				     gd5fxgq4xexxg_ecc_get_status)),
+				     gd5f1gq4xexxg_ecc_get_status)),
+	SPINAND_INFO("GD5F1GQ5UExxG", 0x51,
+		     NAND_MEMORG(1, 2048, 128, 64, 1024, 1, 1, 1),
+		     NAND_ECCREQ(4, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     SPINAND_HAS_QE_BIT,
+		     SPINAND_ECCINFO(&gd5fxgq4xexxg_ooblayout,
+				     gd5fxgq5xexxg_ecc_get_status)),
+	SPINAND_INFO("GD5F2GQ5UExxG", 0x52,
+		     NAND_MEMORG(1, 2048, 128, 64, 2048, 1, 1, 1),
+		     NAND_ECCREQ(4, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     SPINAND_HAS_QE_BIT,
+		     SPINAND_ECCINFO(&gd5fxgq4xexxg_ooblayout,
+				     gd5fxgq5xexxg_ecc_get_status)),
+	SPINAND_INFO("GD5F2GQ4UBExxG", 0xd2,
+		     NAND_MEMORG(1, 2048, 128, 64, 2048, 1, 1, 1),
+		     NAND_ECCREQ(8, 512),
+		     SPINAND_INFO_OP_VARIANTS(&read_cache_variants,
+					      &write_cache_variants,
+					      &update_cache_variants),
+		     SPINAND_HAS_QE_BIT,
+		     SPINAND_ECCINFO(&gd5fxgq4xexxg_ooblayout,
+				     gd5f1gq4xexxg_ecc_get_status)),
 };
 
 static int gigadevice_spinand_detect(struct spinand_device *spinand)
@@ -133,8 +202,9 @@ static int gigadevice_spinand_detect(struct spinand_device *spinand)
 	ret = spinand_match_and_init(spinand, gigadevice_spinand_table,
 				     ARRAY_SIZE(gigadevice_spinand_table),
 				     id[2]);
+	/* Not Only GD Nands MFR equals C8h */
 	if (ret)
-		return ret;
+		return 0;
 
 	return 1;
 }

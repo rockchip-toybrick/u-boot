@@ -10,7 +10,7 @@
 #include <errno.h>
 #include <fdtdec.h>
 #include <i2c.h>
-#include <linux/usb/phy-rockchip-inno-usb2.h>
+#include <linux/usb/phy-rockchip-usb2.h>
 #include <malloc.h>
 #include <power/battery.h>
 #include <power/fuel_gauge.h>
@@ -219,7 +219,7 @@ static int cw201x_get_vol(struct cw201x_info *cw201x)
 
 static int cw201x_dwc_otg_check_dpdm(void)
 {
-#ifdef CONFIG_PHY_ROCKCHIP_INNO_USB2
+#if defined(CONFIG_PHY_ROCKCHIP_INNO_USB2) && !defined(CONFIG_SPL_BUILD)
 	return rockchip_chg_get_type();
 #else
 	debug("rockchip_chg_get_type() is not implement\n");

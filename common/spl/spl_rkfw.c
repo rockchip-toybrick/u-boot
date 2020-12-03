@@ -4,9 +4,17 @@
  */
 
 #include <common.h>
+#include <android_image.h>
+#include <errno.h>
 #include <malloc.h>
+#include <misc.h>
+#include <spl.h>
 #include <spl_rkfw.h>
+#include <linux/kernel.h>
+#include <asm/arch/spl_resource_img.h>
+#include <boot_rkimg.h>
 
+#ifdef CONFIG_SPL_ATF
 static const __aligned(16) struct s_fip_name_id fip_name_id[] = {
 	{ BL30_IMAGE_NAME, UUID_SCP_FIRMWARE_BL30 },		/* optional */
 	{ BL31_IMAGE_NAME, UUID_EL3_RUNTIME_FIRMWARE_BL31 },	/* mandatory */
@@ -159,7 +167,7 @@ static int load_image(struct spl_load_info *info,
 }
 
 static int rkfw_load_trust(struct spl_load_info *info, u32 image_sector,
-			   uintptr_t *bl31_entry, uintptr_t *bl32_entry,
+			   struct spl_image_info *spl_image,
 			   int *found_rkfw, u32 try_count)
 {
 	struct tag_tboot_header_2k hdr;
@@ -179,16 +187,16 @@ static int rkfw_load_trust(struct spl_load_info *info, u32 image_sector,
 
 			/* bl31 is mandatory */
 			ret = load_image(info, &hdr, sect_addr,
-					 BL31_IMAGE_NAME, bl31_entry);
+					 BL31_IMAGE_NAME, &spl_image->entry_point);
 			if (ret)
 				continue;
 
 			/* bl32 is optional */
 			ret = load_image(info, &hdr, sect_addr,
-					 BL32_IMAGE_NAME, bl32_entry);
+					 BL32_IMAGE_NAME, &spl_image->entry_point_bl32);
 			if (ret) {
 				if (ret == -ENONET) {
-					*bl32_entry = -1;	/* Not exist */
+					spl_image->entry_point_bl32 = -1;	/* Not exist */
 					ret = 0;
 				} else {
 					continue;
@@ -200,9 +208,52 @@ static int rkfw_load_trust(struct spl_load_info *info, u32 image_sector,
 
 	return ret;
 }
+#else /* op-tee */
+static int rkfw_load_trust(struct spl_load_info *info, u32 image_sector,
+			   struct spl_image_info *spl_image,
+			   int *found_rkfw, u32 try_count)
+{
+	struct tag_second_loader_hdr hdr;
+	int i, ret, blkcnt = 4;	/* header sectors, 2KB */
+	char *load_addr;
+	u32 sect_addr;
+
+	/* Detect valid image header */
+	for (i = 0; i < try_count; i++) {
+		sect_addr = image_sector + (i * RKFW_RETRY_SECTOR_SIZE);
+		ret = info->read(info, sect_addr, blkcnt, &hdr);
+		if (ret != blkcnt)
+			continue;
+
+		if (!memcmp(hdr.magic, TBOOT_HEAD_TAG, 6)) {
+			*found_rkfw = 1;
+			spl_image->entry_point = (uintptr_t)hdr.loader_load_addr;
+			/* Load full binary image(right behind header) */
+			sect_addr += blkcnt;
+			load_addr = (char *)((size_t)hdr.loader_load_addr);
+			blkcnt = DIV_ROUND_UP(hdr.loader_load_size, 512);
+
+			printf("tee.bin: addr=0x%lx, size=0x%lx\n",
+			       (ulong)load_addr, (ulong)blkcnt * 512);
+			ret = info->read(info, sect_addr, blkcnt, load_addr);
+			if (ret != blkcnt)
+				continue;
+
+			break;
+		}
+	}
+
+	if (i == try_count) {
+		printf("Can not find usable trust\n");
+		return -ENONET;
+	}
+
+	return 0;
+}
+#endif
 
 static int rkfw_load_uboot(struct spl_load_info *info, u32 image_sector,
-			   uintptr_t *bl33_entry, u32 try_count)
+			   struct spl_image_info *spl_image, u32 try_count)
 {
 	struct tag_second_loader_hdr hdr;
 	int i, ret, blkcnt = 4;	/* header sectors, 2KB */
@@ -238,40 +289,246 @@ static int rkfw_load_uboot(struct spl_load_info *info, u32 image_sector,
 	}
 
 	/* Fill entry point */
-	*bl33_entry = (uintptr_t)hdr.loader_load_addr;
-
+#ifdef CONFIG_SPL_ATF
+	spl_image->entry_point_bl33 = (uintptr_t)hdr.loader_load_addr;
+#endif
+#ifdef CONFIG_SPL_OPTEE
+	spl_image->entry_point_os = (uintptr_t)hdr.loader_load_addr;
+#endif
 	return 0;
 }
 
-int spl_load_rkfw_image(struct spl_image_info *spl_image,
-			struct spl_load_info *info,
-			u32 trust_sector, u32 uboot_sector)
+static int rkfw_load_kernel(struct spl_load_info *info, u32 image_sector,
+			    struct spl_image_info *spl_image, u32 try_count)
 {
-	int ret, try_count = RKFW_RETRY_SECTOR_TIMES;
-	int found_rkfw = 0;
+	struct andr_img_hdr *hdr;
+	int ret, cnt;
+	int dtb_sector, ramdisk_sector, resource_sector;
 
-	ret = rkfw_load_trust(info, trust_sector,
-			      &spl_image->entry_point,
-			      &spl_image->entry_point_bl32,
-			      &found_rkfw, try_count);
-	if (ret) {
-		printf("Load trust image failed! ret=%d\n", ret);
+	cnt = ALIGN(sizeof(struct andr_img_hdr), 512) >> 9;
+	hdr = malloc(cnt * 512);
+	if (!hdr)
+		return -ENOMEM;
+
+	ret = info->read(info, image_sector, cnt, (void *)hdr);
+	if (ret != cnt) {
+		ret = -EIO;
 		goto out;
 	}
 
-	ret = rkfw_load_uboot(info, uboot_sector,
-			      &spl_image->entry_point_bl33, try_count);
-	if (ret) {
-		printf("Load uboot image failed! ret=%d\n", ret);
+	if (memcmp(hdr->magic, ANDR_BOOT_MAGIC, strlen(ANDR_BOOT_MAGIC)) != 0) {
+		printf("SPL: boot image head magic error\n");
+		ret = -EINVAL;
 		goto out;
+	}
+
+	ramdisk_sector = ALIGN(hdr->kernel_size, hdr->page_size);
+	resource_sector = ALIGN(hdr->kernel_size, hdr->page_size)
+			+ ALIGN(hdr->ramdisk_size, hdr->page_size);
+	dtb_sector = ALIGN(hdr->kernel_size, hdr->page_size)
+			+ ALIGN(hdr->ramdisk_size, hdr->page_size)
+			+ ALIGN(hdr->second_size, hdr->page_size);
+	image_sector = image_sector + cnt;
+	cnt = ALIGN(hdr->kernel_size, hdr->page_size) >> 9;
+
+	/* Load kernel image */
+#ifdef CONFIG_SPL_ROCKCHIP_HW_DECOMPRESS
+	ret = info->read(info, image_sector, cnt,
+			 (void *)CONFIG_SPL_KERNEL_COMPRESS_ADDR);
+#else
+	ret = info->read(info, image_sector, cnt, (void *)CONFIG_SPL_KERNEL_ADDR);
+#endif
+	if (ret != cnt) {
+		ret = -EIO;
+		goto out;
+	}
+#ifdef CONFIG_SPL_ROCKCHIP_HW_DECOMPRESS
+	struct udevice *dev;
+	u32 cap = DECOM_GZIP;
+
+	dev = misc_decompress_get_device(cap);
+
+	if (!dev)
+		goto out;
+
+	ret = misc_decompress_start(dev, CONFIG_SPL_KERNEL_COMPRESS_ADDR,
+				    CONFIG_SPL_KERNEL_ADDR,
+				    CONFIG_SPL_KERNEL_DECOM_LIMIT_SIZE);
+	if (ret)
+		goto out;
+
+#endif
+
+	/* Load ramdisk image */
+	if (hdr->ramdisk_size) {
+#ifdef CONFIG_SPL_ROCKCHIP_HW_DECOMPRESS
+		ret = info->read(info, (ramdisk_sector >> 9) + image_sector,
+				 ALIGN(hdr->ramdisk_size, hdr->page_size) >> 9,
+				 (void *)CONFIG_SPL_RAMDISK_COMPRESS_ADDR);
+#else
+		ret = info->read(info, (ramdisk_sector >> 9) + image_sector,
+				 ALIGN(hdr->ramdisk_size, hdr->page_size) >> 9,
+				 (void *)CONFIG_SPL_RAMDISK_ADDR);
+#endif
+		if (ret != (ALIGN(hdr->ramdisk_size, hdr->page_size) >> 9)) {
+			ret = -EIO;
+			goto out;
+		}
+#ifdef CONFIG_SPL_ROCKCHIP_HW_DECOMPRESS
+		int timeout = 10000;
+
+		while (!misc_decompress_is_complete(dev)) {
+			if (timeout < 0) {
+				ret = -EIO;
+				goto out;
+			}
+
+			timeout--;
+			udelay(10);
+		}
+
+		ret = misc_decompress_stop(dev);
+		if (ret)
+			goto out;
+
+		ret = misc_decompress_start(dev,
+					    CONFIG_SPL_RAMDISK_COMPRESS_ADDR,
+					    CONFIG_SPL_RAMDISK_ADDR,
+					    CONFIG_SPL_RAMDISK_DECOM_LIMIT_SIZE);
+		if (ret)
+			goto out;
+#endif
+	}
+#ifdef CONFIG_SPL_ROCKCHIP_HW_DECOMPRESS
+	else {
+		int timeout = 10000;
+
+		while (!misc_decompress_is_complete(dev)) {
+			if (timeout < 0) {
+				ret = -EIO;
+				goto out;
+			}
+
+			timeout--;
+			udelay(10);
+		}
+	}
+#endif
+	/* Load resource, and checkout the dtb */
+	if (hdr->second_size) {
+		struct resource_img_hdr *head =
+		   (struct resource_img_hdr *)(CONFIG_SPL_FDT_ADDR + 0x100000);
+
+		ret = info->read(info, (resource_sector >> 9) + image_sector,
+				 ALIGN(hdr->second_size, hdr->page_size) >> 9,
+				 (void *)head);
+		if (ret != (ALIGN(hdr->second_size, hdr->page_size) >> 9)) {
+			ret = -EIO;
+			goto out;
+		}
+#ifdef CONFIG_SPL_KERNEL_BOOT
+		if (spl_resource_image_check_header(head)) {
+			printf("Can't find kernel dtb in spl.");
+		} else {
+			struct resource_entry *entry;
+			char *dtb_temp;
+
+			entry = spl_resource_image_get_dtb_entry(head);
+			if (!entry) {
+				ret = -EIO;
+				goto out;
+			}
+
+			dtb_temp = (char *)((char *)head + entry->f_offset * 512);
+			memcpy((char *)CONFIG_SPL_FDT_ADDR, dtb_temp,
+			       entry->f_size);
+		}
+#endif
+	} else {
+		/* Load dtb image */
+		ret = info->read(info, (dtb_sector >> 9) + image_sector,
+				 ALIGN(hdr->dtb_size, hdr->page_size) >> 9,
+				 (void *)CONFIG_SPL_FDT_ADDR);
+		if (ret != (ALIGN(hdr->dtb_size, hdr->page_size) >> 9)) {
+			ret = -EIO;
+			goto out;
+		}
+	}
+
+	spl_image->fdt_addr = (void *)CONFIG_SPL_FDT_ADDR;
+#ifdef CONFIG_SPL_OPTEE
+	spl_image->entry_point_os = (uintptr_t)CONFIG_SPL_KERNEL_ADDR;
+#endif
+#ifdef CONFIG_SPL_ATF
+	spl_image->entry_point_bl33 = CONFIG_SPL_KERNEL_ADDR;
+#endif
+	ret = 0;
+out:
+	free(hdr);
+
+	return ret;
+}
+
+int spl_load_rkfw_image(struct spl_image_info *spl_image,
+			struct spl_load_info *info)
+{
+	u32 uboot_sector = CONFIG_RKFW_U_BOOT_SECTOR;
+	u32 trust_sector = CONFIG_RKFW_TRUST_SECTOR;
+	u32 boot_sector  = CONFIG_RKFW_BOOT_SECTOR;
+	int ret, try_count = RKFW_RETRY_SECTOR_TIMES;
+	int found_rkfw = 0;
+	char *part_name;
+#ifdef CONFIG_SPL_LIBDISK_SUPPORT
+	struct blk_desc *dev_desc = info->dev;
+	disk_partition_t part_info;
+
+	if (dev_desc) {
+		if (part_get_info_by_name(dev_desc, PART_UBOOT, &part_info) > 0)
+			uboot_sector = part_info.start;
+		if (part_get_info_by_name(dev_desc, PART_TRUST, &part_info) > 0)
+			trust_sector = part_info.start;
+		if (part_get_info_by_name(dev_desc, PART_BOOT, &part_info) > 0)
+			boot_sector = part_info.start;
+	}
+#endif
+	/* u-boot or boot */
+	if (spl_image->next_stage != SPL_NEXT_STAGE_UBOOT)
+		uboot_sector = 0;
+
+	ret = rkfw_load_trust(info, trust_sector, spl_image,
+			      &found_rkfw, try_count);
+	if (ret) {
+		part_name = PART_TRUST;
+		goto out;
+	}
+
+	if (uboot_sector) {
+		ret = rkfw_load_uboot(info, uboot_sector, spl_image, try_count);
+		if (ret) {
+			part_name = PART_UBOOT;
+			goto out;
+		}
+	} else {
+		ret = rkfw_load_kernel(info, boot_sector, spl_image, try_count);
+		if (ret) {
+			part_name = PART_BOOT;
+			goto out;
+		}
 	}
 
 #if CONFIG_IS_ENABLED(LOAD_FIT)
 	spl_image->fdt_addr = 0;
 #endif
+#ifdef CONFIG_SPL_ATF
 	spl_image->os = IH_OS_ARM_TRUSTED_FIRMWARE;
+#else
+	spl_image->os = IH_OS_OP_TEE;
+#endif
 
 out:
+	if (ret)
+		printf("Load %s part failed! ret=%d\n", part_name, ret);
+
 	/* If not found rockchip firmware, try others outside */
 	return found_rkfw ? ret : -EAGAIN;
 }

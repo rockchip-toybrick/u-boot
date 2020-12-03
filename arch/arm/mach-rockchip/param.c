@@ -12,6 +12,8 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#define SZ_4GB				0x100000000ULL
+
 #if !defined(CONFIG_SPL_BUILD) && !defined(CONFIG_TPL_BUILD)
 #define SDRAM_OFFSET(offset)		(CONFIG_SYS_SDRAM_BASE + (offset))
 #define PARAM_DRAM_INFO_OFFSET		(SZ_32M)
@@ -220,6 +222,24 @@ int param_parse_bootdev(char **devtype, char **devnum)
 			*devnum = "0";
 			break;
 #endif
+#ifdef CONFIG_NAND
+		case BOOT_TYPE_MTD_BLK_NAND:
+			*devtype = "mtd";
+			*devnum = "0";
+			break;
+#endif
+#ifdef CONFIG_MTD_SPI_NAND
+		case BOOT_TYPE_MTD_BLK_SPI_NAND:
+			*devtype = "mtd";
+			*devnum = "1";
+			break;
+#endif
+#ifdef CONFIG_SPI_FLASH_MTD
+		case BOOT_TYPE_MTD_BLK_SPI_NOR:
+			*devtype = "mtd";
+			*devnum = "2";
+			break;
+#endif
 		default:
 			printf("Unknown bootdev type: 0x%x\n",
 			       t->u.bootdev.devtype);
@@ -233,6 +253,12 @@ int param_parse_bootdev(char **devtype, char **devnum)
 	return -ENOSYS;
 }
 #endif
+
+static phys_size_t ddr_mem_get_usable_size(u64 base, u64 size)
+{
+	return (base + size >= CONFIG_SYS_SDRAM_BASE + SDRAM_MAX_SIZE) ?
+	       (CONFIG_SYS_SDRAM_BASE + SDRAM_MAX_SIZE - base) : size;
+}
 
 struct memblock *param_parse_ddr_mem(int *out_count)
 {
@@ -249,22 +275,41 @@ struct memblock *param_parse_ddr_mem(int *out_count)
 	 */
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	struct tag *t;
+	u64 base, size;
+	int n;
 
 	t = atags_get_tag(ATAG_DDR_MEM);
 	if (t && t->u.ddr_mem.count) {
 		count = t->u.ddr_mem.count;
-		mem = calloc(count, sizeof(*mem));
+		mem = calloc(count + MEM_RESV_COUNT, sizeof(*mem));
 		if (!mem) {
 			printf("Calloc ddr memory failed\n");
 			return 0;
 		}
 
-		for (i = 0; i < count; i++) {
-			mem[i].base = t->u.ddr_mem.bank[i];
-			mem[i].size = t->u.ddr_mem.bank[i + count];
+		for (i = 0, n = 0; i < count; i++, n++) {
+			base = t->u.ddr_mem.bank[i];
+			size = t->u.ddr_mem.bank[i + count];
+
+			/* 0~4GB */
+			if (base < SZ_4GB) {
+				mem[n].base = base;
+				mem[n].size = ddr_mem_get_usable_size(base, size);
+				if (base + size > SZ_4GB) {
+					n++;
+					mem[n].base_u64 = SZ_4GB;
+					mem[n].size_u64 = base + size - SZ_4GB;
+				}
+			} else {
+				/* 4GB+ */
+				mem[n].base_u64 = base;
+				mem[n].size_u64 = size;
+			}
+
+			assert(n < count + MEM_RESV_COUNT);
 		}
 
-		*out_count = count;
+		*out_count = n;
 		return mem;
 	}
 #endif
@@ -293,7 +338,7 @@ struct memblock *param_parse_ddr_mem(int *out_count)
 
 	for (i = 0; i < count; i++) {
 		mem[i].base = CONFIG_SYS_SDRAM_BASE;
-		mem[i].size = ram.size;
+		mem[i].size = ddr_mem_get_usable_size(mem[i].base, ram.size);
 	}
 
 	*out_count = count;

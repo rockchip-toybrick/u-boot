@@ -11,7 +11,14 @@
 #include <ide.h>
 #include <malloc.h>
 #include <part.h>
+#ifdef CONFIG_SPL_AB
+#include <spl_ab.h>
+#endif
 #include <ubifs_uboot.h>
+#ifdef CONFIG_ANDROID_AB
+#include <android_avb/avb_ops_user.h>
+#include <android_avb/rk_avb_ops_user.h>
+#endif
 
 #undef	PART_DEBUG
 
@@ -667,26 +674,51 @@ cleanup:
 	return ret;
 }
 
+/*
+ * For android A/B system, we append the current slot suffix quietly,
+ * this takes over the responsibility of slot suffix appending from
+ * developer to framework.
+ */
 int part_get_info_by_name(struct blk_desc *dev_desc, const char *name,
-	disk_partition_t *info)
+			  disk_partition_t *info)
 {
 	struct part_driver *part_drv;
-	int ret;
-	int i;
+	char name_slot[32] = {0};
+	int none_slot_try = 1;
+	int ret, i;
 
 	part_drv = part_driver_lookup_type(dev_desc);
 	if (!part_drv)
 		return -1;
+#if defined(CONFIG_ANDROID_AB) && !defined(CONFIG_SPL_BUILD)
+	/* 1. Query partition with A/B slot suffix */
+	if (rk_avb_append_part_slot(name, name_slot))
+		return -1;
+#elif defined(CONFIG_SPL_AB) && defined(CONFIG_SPL_BUILD)
+	if (spl_ab_append_part_slot(dev_desc, name, name_slot))
+		return -1;
+#else
+	strcpy(name_slot, name);
+#endif
+retry:
+	debug("## Query partition(%d): %s\n", none_slot_try, name_slot);
 	for (i = 1; i < part_drv->max_entries; i++) {
 		ret = part_drv->get_info(dev_desc, i, info);
 		if (ret != 0) {
 			/* no more entries in table */
 			break;
 		}
-		if (strcmp(name, (const char *)info->name) == 0) {
+		if (strcmp(name_slot, (const char *)info->name) == 0) {
 			/* matched */
 			return i;
 		}
+	}
+
+	/* 2. Query partition without A/B slot suffix if above failed */
+	if (none_slot_try) {
+		none_slot_try = 0;
+		strcpy(name_slot, name);
+		goto retry;
 	}
 
 	return -1;

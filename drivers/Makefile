@@ -8,6 +8,7 @@ obj-$(CONFIG_$(SPL_TPL_)DM_CRYPTO) += crypto/
 obj-$(CONFIG_$(SPL_TPL_)DRIVERS_MISC_SUPPORT) += misc/ sysreset/ firmware/
 obj-$(CONFIG_$(SPL_TPL_)I2C_SUPPORT) += i2c/
 obj-$(CONFIG_$(SPL_TPL_)LED) += led/
+obj-$(CONFIG_$(SPL_TPL_)INPUT) += input/
 obj-$(CONFIG_$(SPL_TPL_)MMC_SUPPORT) += mmc/
 obj-$(CONFIG_$(SPL_TPL_)NAND_SUPPORT) += mtd/nand/raw/
 obj-$(CONFIG_$(SPL_TPL_)PHY) += phy/
@@ -21,7 +22,7 @@ obj-$(CONFIG_$(SPL_TPL_)IRQ) += irq/
 
 ifndef CONFIG_TPL_BUILD
 ifdef CONFIG_SPL_BUILD
-
+obj-$(CONFIG_SPL_ADC_SUPPORT) += adc/
 obj-$(CONFIG_SPL_CPU_SUPPORT) += cpu/
 obj-$(CONFIG_SPL_CRYPTO_SUPPORT) += crypto/
 obj-$(CONFIG_SPL_GPIO_SUPPORT) += gpio/
@@ -31,6 +32,8 @@ obj-$(CONFIG_ARMADA_XP) += ddr/marvell/axp/
 obj-$(CONFIG_ALTERA_SDRAM) += ddr/altera/
 obj-$(CONFIG_SPL_POWER_SUPPORT) += power/ power/pmic/
 obj-$(CONFIG_SPL_POWER_SUPPORT) += power/regulator/
+obj-$(CONFIG_SPL_POWER_SUPPORT) += power/fuel_gauge/
+obj-$(CONFIG_SPL_PWM_SUPPORT) += pwm/
 obj-$(CONFIG_SPL_MTD_SUPPORT) += mtd/
 obj-$(CONFIG_SPL_ONENAND_SUPPORT) += mtd/onenand/
 obj-$(CONFIG_SPL_UBI) += mtd/ubispl/
@@ -42,17 +45,21 @@ obj-$(CONFIG_SPL_PCI_SUPPORT) += pci/
 obj-$(CONFIG_SPL_PCH_SUPPORT) += pch/
 obj-$(CONFIG_SPL_RTC_SUPPORT) += rtc/
 obj-$(CONFIG_SPL_MUSB_NEW_SUPPORT) += usb/musb-new/
-obj-$(CONFIG_SPL_USB_GADGET_SUPPORT) += usb/gadget/
-obj-$(CONFIG_SPL_USB_GADGET_SUPPORT) += usb/gadget/udc/
-obj-$(CONFIG_SPL_DFU_SUPPORT) += dfu/
+obj-$(CONFIG_SPL_USB_GADGET) += usb/gadget/
+obj-$(CONFIG_SPL_USB_GADGET) += usb/gadget/udc/
+obj-$(CONFIG_SPL_USB_GADGET) += usb/gadget/
+obj-$(CONFIG_SPL_USB_GADGET) += usb/common/
+obj-$(CONFIG_SPL_USB_GADGET) += usb/gadget/udc/
+obj-$(CONFIG_SPL_DFU) += dfu/
 obj-$(CONFIG_SPL_WATCHDOG_SUPPORT) += watchdog/
 obj-$(CONFIG_SPL_USB_HOST_SUPPORT) += usb/host/
 obj-$(CONFIG_OMAP_USB_PHY) += usb/phy/
 obj-$(CONFIG_SPL_SATA_SUPPORT) += ata/ scsi/
 obj-$(CONFIG_SPL_USB_HOST_SUPPORT) += block/
 obj-$(CONFIG_SPL_MMC_SUPPORT) += block/
+obj-$(CONFIG_SPL_MTD_SUPPORT) += block/
 obj-$(CONFIG_SPL_FPGA_SUPPORT) += fpga/
-
+obj-$(CONFIG_SPL_RKNAND_SUPPORT) += rknand/
 endif
 endif
 
@@ -96,7 +103,6 @@ obj-$(CONFIG_U_QE) += qe/
 obj-y += mailbox/
 obj-y += memory/
 obj-y += pwm/
-obj-y += reset/
 obj-y += input/
 # SOC specific infrastructure drivers.
 obj-y += soc/
@@ -105,3 +111,6 @@ obj-y += thermal/
 
 obj-$(CONFIG_MACH_PIC32) += ddr/microchip/
 endif
+
+obj-$(CONFIG_$(SPL_TPL_)DM_RESET) += reset/
+

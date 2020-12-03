@@ -5,7 +5,9 @@
  */
 
 #include <common.h>
+#include <dm.h>
 #include <fdtdec.h>
+#include <fdt_support.h>
 #include <inttypes.h>
 #include <nand.h>
 #include <linux/kernel.h>
@@ -79,9 +81,14 @@ struct rk_nand {
 	u8 chipnr;
 	u8 id[5];
 	u8 *databuf;
+	struct udevice *dev;
+	struct mtd_info *mtd;
 };
 
-struct rk_nand *g_rk_nand;
+static struct rk_nand *g_rk_nand;
+static u32 nand_page_size;
+static u32 nand_page_num;
+static u32 nand_block_num;
 
 static void nandc_init(struct rk_nand *rknand)
 {
@@ -172,7 +179,7 @@ static int nandc_read_page(unsigned int page, uint8_t *buf)
 	unsigned int max_bitflips = 0;
 	int ret, step, bch_st, ecc_step;
 
-	ecc_step = CONFIG_SYS_NAND_PAGE_SIZE / 1024;
+	ecc_step = nand_page_size / 1024;
 	rockchip_nand_select_chip(g_rk_nand->regs, 0);
 	rockchip_nand_read_page(g_rk_nand->regs, page, 0);
 	rockchip_nand_wait_dev_ready(g_rk_nand->regs);
@@ -216,8 +223,7 @@ static int is_badblock(unsigned int page)
 
 	if (nandc_read_page(page, g_rk_nand->databuf) == -1) {
 		rockchip_nand_select_chip(regs, 0);
-		rockchip_nand_read_page(regs, page,
-					CONFIG_SYS_NAND_PAGE_SIZE);
+		rockchip_nand_read_page(regs, page, nand_page_size);
 		rockchip_nand_wait_dev_ready(regs);
 		for (i = 0; i < 8; i++) {
 			bad = readb(bank_base);
@@ -247,10 +253,204 @@ static void read_flash_id(struct rk_nand *rknand, uint8_t *id)
 	id[3] = readb(bank_base);
 	id[4] = readb(bank_base);
 	rockchip_nand_select_chip(rknand->regs, -1);
-	printf("%s %x %x %x %x %x\n", __func__, id[0], id[1], id[2], id[3],
-	       id[4]);
+	if (id[0] != 0xFF && id[0] != 0x00)
+		printf("NAND:%x %x\n", id[0], id[1]);
 }
 
+#ifdef CONFIG_NAND_ROCKCHIP_DT
+static const struct udevice_id rockchip_nandc_ids[] = {
+	{ .compatible = "rockchip,rk-nandc" },
+	{ }
+};
+
+static int spl_nand_block_isbad(struct mtd_info *mtd, loff_t ofs)
+{
+	return is_badblock((u32)ofs / nand_page_size);
+}
+
+static int spl_nand_read_page(struct mtd_info *mtd, loff_t from, size_t len,
+			      size_t *retlen, u_char *buf)
+{
+	int read_size, offset, read_len;
+	unsigned int page;
+	unsigned int max_pages = nand_page_num * nand_block_num;
+
+	/* Convert to page number */
+	page = (u32)from / nand_page_size;
+	offset = from & (nand_page_size - 1);
+	read_len = len;
+	*retlen = 0;
+
+	while (read_len) {
+		read_size = nand_page_size - offset;
+		if (read_size > read_len)
+			read_size = read_len;
+		if (offset || read_size < nand_page_size) {
+			if (nandc_read_page(page, g_rk_nand->databuf) < 0)
+				return -EIO;
+			memcpy(buf, g_rk_nand->databuf + offset, read_size);
+			offset = 0;
+		} else {
+			if (nandc_read_page(page, buf) < 0)
+				return -EIO;
+		}
+		page++;
+		read_len -= read_size;
+		buf += read_size;
+		if (page >= max_pages)
+			return -EIO;
+	}
+
+	*retlen = len;
+
+	return 0;
+}
+
+static int rockchip_nandc_probe(struct udevice *dev)
+{
+	const void *blob = gd->fdt_blob;
+	struct rk_nand *rknand = dev_get_priv(dev);
+	struct mtd_info *mtd = dev_get_uclass_priv(dev);
+	fdt_addr_t regs;
+	int ret = -ENODEV;
+	int node;
+	u8 *id;
+
+	g_rk_nand = rknand;
+	rknand->dev = dev;
+
+	node = fdtdec_next_compatible(blob, 0, COMPAT_ROCKCHIP_NANDC);
+
+	if (node < 0) {
+		printf("Nand node not found\n");
+		return -ENODEV;
+	}
+
+	if (!fdtdec_get_is_enabled(blob, node)) {
+		debug("Nand disabled in device tree\n");
+		return -ENODEV;
+	}
+
+	regs = fdt_get_base_address(blob, node);
+	if (!regs) {
+		debug("Nand address not found\n");
+		return -ENODEV;
+	}
+
+	rknand->regs = (void *)regs;
+
+	nandc_init(g_rk_nand);
+	read_flash_id(g_rk_nand, g_rk_nand->id);
+
+	id = g_rk_nand->id;
+	if (id[0] == id[1])
+		return -ENODEV;
+
+	if (id[1] == 0xA1 || id[1] == 0xF1 ||
+	    id[1] == 0xD1 || id[1] == 0xAA ||
+	    id[1] == 0xDA || id[1] == 0xAC ||
+	    id[1] == 0xDC || id[1] == 0xA3 ||
+	    id[1] == 0xD3 || id[1] == 0x95 ||
+	    id[1] == 0x48) {
+		nand_page_size = 2048;
+		nand_page_num = 64;
+		nand_block_num = 1024;
+		if (id[1] == 0xDC) {
+			if ((id[0] == 0x2C && id[3] == 0xA6) ||
+			    (id[0] == 0xC2 && id[3] == 0xA2)) {
+				nand_page_size = 4096;
+				nand_block_num = 2048;
+			} else if (id[0] == 0x98 && id[3] == 0x26) {
+				nand_page_size = 4096;
+				nand_block_num = 2048;
+			} else {
+				nand_block_num = 4096;
+			}
+		} else if (id[1] == 0xDA) {
+			nand_block_num = 2048;
+		} else if (id[1] == 0x48) {
+			nand_page_size = 4096;
+			nand_page_num = 128;
+			nand_block_num = 4096;
+		} else if (id[1] == 0xD3) {
+			nand_page_size = 4096;
+			nand_block_num = 4096;
+		}
+
+		g_rk_nand->chipnr = 1;
+		g_rk_nand->databuf = kzalloc(nand_page_size, GFP_KERNEL);
+		if (!g_rk_nand)
+			return -ENOMEM;
+		mtd->_block_isbad = spl_nand_block_isbad;
+		mtd->_read = spl_nand_read_page;
+		mtd->size = (size_t)nand_page_size * nand_page_num *
+			    nand_block_num;
+		mtd->writesize = nand_page_size;
+		mtd->erasesize = nand_page_size * nand_page_num;
+		mtd->erasesize_shift = ffs(mtd->erasesize) - 1;
+		mtd->erasesize_mask = (1 << mtd->erasesize_shift) - 1;
+		mtd->type = MTD_NANDFLASH;
+		mtd->dev = rknand->dev;
+		mtd->priv = rknand;
+		add_mtd_device(mtd);
+		mtd->name = "rk-nand";
+		rknand->mtd = mtd;
+		ret = 0;
+	}
+
+	return ret;
+}
+
+static int rockchip_nandc_bind(struct udevice *udev)
+{
+	int ret = 0;
+
+#ifdef CONFIG_MTD_BLK
+	struct udevice *bdev;
+
+	ret = blk_create_devicef(udev, "mtd_blk", "blk", IF_TYPE_MTD,
+				 BLK_MTD_NAND, 512, 0, &bdev);
+	if (ret)
+		printf("Cannot create block device\n");
+#endif
+	return ret;
+}
+
+U_BOOT_DRIVER(rk_nandc_v6) = {
+	.name           = "rk_nandc_v6",
+	.id             = UCLASS_MTD,
+	.of_match       = rockchip_nandc_ids,
+	.bind		= rockchip_nandc_bind,
+	.probe          = rockchip_nandc_probe,
+	.priv_auto_alloc_size = sizeof(struct rk_nand),
+};
+
+void board_nand_init(void)
+{
+	struct udevice *dev;
+	int ret;
+
+	ret = uclass_get_device_by_driver(UCLASS_MTD,
+					  DM_GET_DRIVER(rk_nandc_v6),
+					  &dev);
+	if (ret && ret != -ENODEV)
+		pr_err("Failed to initialize NAND controller. (error %d)\n",
+		       ret);
+}
+
+int nand_spl_load_image(u32 offs, u32 size, void *buf)
+{
+	return -EIO;
+}
+
+void nand_init(void){};
+
+int rk_nand_init(void)
+{
+	return -ENODEV;
+}
+
+#else
 void board_nand_init(void)
 {
 	const void *blob = gd->fdt_blob;
@@ -262,6 +462,8 @@ void board_nand_init(void)
 		return;
 
 	initialized = 1;
+	nand_page_size = CONFIG_SYS_NAND_PAGE_SIZE;
+	nand_page_num = CONFIG_SYS_NAND_PAGE_COUNT;
 
 	if (g_rk_nand)
 		return;
@@ -270,31 +472,43 @@ void board_nand_init(void)
 
 	if (node < 0) {
 		printf("Nand node not found\n");
-		goto err;
+		return;
 	}
 
 	if (!fdtdec_get_is_enabled(blob, node)) {
 		debug("Nand disabled in device tree\n");
-		goto err;
+		return;
 	}
 
 	regs = fdt_get_base_address(blob, node);
-	if (regs == FDT_ADDR_T_NONE) {
+	if (!regs) {
 		debug("Nand address not found\n");
-		goto err;
+		return;
 	}
 
 	g_rk_nand = kzalloc(sizeof(*g_rk_nand), GFP_KERNEL);
 	g_rk_nand->regs = (void *)regs;
-	g_rk_nand->databuf = kzalloc(CONFIG_SYS_NAND_PAGE_SIZE, GFP_KERNEL);
+	g_rk_nand->databuf = kzalloc(nand_page_size, GFP_KERNEL);
 	nandc_init(g_rk_nand);
 	read_flash_id(g_rk_nand, g_rk_nand->id);
-	if (g_rk_nand->id[0] != 0xFF && g_rk_nand->id[1] != 0xFF &&
-	    g_rk_nand->id[0] != 0x00 && g_rk_nand->id[1] != 0x00)
+
+	if (g_rk_nand->id[0] == g_rk_nand->id[1])
+		goto err;
+
+	if (g_rk_nand->id[1] == 0xA1 || g_rk_nand->id[1] == 0xF1 ||
+	    g_rk_nand->id[1] == 0xD1 || g_rk_nand->id[1] == 0xAA ||
+	    g_rk_nand->id[1] == 0xDA || g_rk_nand->id[1] == 0xAC ||
+	    g_rk_nand->id[1] == 0xDC || g_rk_nand->id[1] == 0xA3 ||
+	    g_rk_nand->id[1] == 0xD3 || g_rk_nand->id[1] == 0x95 ||
+	    g_rk_nand->id[1] == 0x48) {
 		g_rk_nand->chipnr = 1;
-	return;
+		return;
+	}
+
 err:
+	kfree(g_rk_nand->databuf);
 	kfree(g_rk_nand);
+	g_rk_nand = NULL;
 }
 
 int nand_spl_load_image(u32 offs, u32 size, void *buf)
@@ -302,25 +516,25 @@ int nand_spl_load_image(u32 offs, u32 size, void *buf)
 	int i;
 	unsigned int page;
 	unsigned int maxpages = CONFIG_SYS_NAND_SIZE /
-				CONFIG_SYS_NAND_PAGE_SIZE;
+				nand_page_size;
 
 	/* Convert to page number */
-	page = offs / CONFIG_SYS_NAND_PAGE_SIZE;
+	page = offs / nand_page_size;
 	i = 0;
 
-	size = roundup(size, CONFIG_SYS_NAND_PAGE_SIZE);
-	while (i < size / CONFIG_SYS_NAND_PAGE_SIZE) {
+	size = roundup(size, nand_page_size);
+	while (i < size / nand_page_size) {
 		/*
 		 * Check if we have crossed a block boundary, and if so
 		 * check for bad block.
 		 */
-		if (!(page % CONFIG_SYS_NAND_PAGE_COUNT)) {
+		if (!(page % nand_page_size)) {
 			/*
 			 * Yes, new block. See if this block is good. If not,
 			 * loop until we find a good block.
 			 */
 			while (is_badblock(page)) {
-				page = page + CONFIG_SYS_NAND_PAGE_COUNT;
+				page = page + nand_page_size;
 				/* Check i we've reached the end of flash. */
 				if (page >= maxpages)
 					return -EIO;
@@ -332,7 +546,7 @@ int nand_spl_load_image(u32 offs, u32 size, void *buf)
 
 		page++;
 		i++;
-		buf = buf + CONFIG_SYS_NAND_PAGE_SIZE;
+		buf = buf + nand_page_size;
 	}
 	return 0;
 }
@@ -350,5 +564,7 @@ int rk_nand_init(void)
 	else
 		return -ENODEV;
 }
+#endif
 
 void nand_deselect(void) {}
+

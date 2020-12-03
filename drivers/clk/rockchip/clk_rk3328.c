@@ -348,6 +348,35 @@ static ulong rk3328_mmc_set_clk(struct rk3328_clk_priv *priv,
 	return rk3328_mmc_get_clk(priv, clk_id);
 }
 
+static ulong rk3328_spi_get_clk(struct rk3328_clk_priv *priv)
+{
+	struct rk3328_cru *cru = priv->cru;
+	u32 div, con, mux, p_rate;
+
+	con = readl(&cru->clksel_con[24]);
+	div = (con & CLK_SPI_DIV_CON_MASK) >> CLK_SPI_DIV_CON_SHIFT;
+	mux = (con & CLK_SPI_PLL_SEL_MASK) >> CLK_SPI_PLL_SEL_SHIFT;
+	if (mux)
+		p_rate = priv->gpll_hz;
+	else
+		p_rate = priv->cpll_hz;
+
+	return DIV_TO_RATE(p_rate, div);
+}
+
+static ulong rk3328_spi_set_clk(struct rk3328_clk_priv *priv, uint hz)
+{
+	struct rk3328_cru *cru = priv->cru;
+	u32 div = priv->gpll_hz / hz;
+
+	rk_clrsetreg(&cru->clksel_con[24],
+		     CLK_SPI_PLL_SEL_MASK | CLK_SPI_DIV_CON_MASK,
+		     CLK_SPI_PLL_SEL_GPLL << CLK_SPI_PLL_SEL_SHIFT |
+		     (div - 1) << CLK_SPI_DIV_CON_SHIFT);
+
+	return DIV_TO_RATE(priv->gpll_hz, div);
+}
+
 #ifndef CONFIG_SPL_BUILD
 static ulong rk3328_pwm_get_clk(struct rk3328_clk_priv *priv)
 {
@@ -561,6 +590,8 @@ static ulong rk3328_bus_set_clk(struct rk3328_clk_priv *priv,
 	case ACLK_BUS_PRE:
 		src_clk_div = DIV_ROUND_UP(priv->cpll_hz, hz);
 		assert(src_clk_div - 1 < 31);
+		if (src_clk_div > 32)
+			src_clk_div = 32;
 		rk_clrsetreg(&cru->clksel_con[0],
 			     CLK_BUS_PLL_SEL_MASK | ACLK_BUS_DIV_CON_MASK,
 			     CLK_BUS_PLL_SEL_CPLL << CLK_BUS_PLL_SEL_SHIFT |
@@ -633,6 +664,8 @@ static ulong rk3328_peri_set_clk(struct rk3328_clk_priv *priv,
 	case ACLK_PERI_PRE:
 		src_clk_div = DIV_ROUND_UP(priv->cpll_hz, hz);
 		assert(src_clk_div - 1 < 31);
+		if (src_clk_div > 32)
+			src_clk_div = 32;
 		rk_clrsetreg(&cru->clksel_con[28],
 			     CLK_PERI_PLL_SEL_MASK | ACLK_PERI_DIV_CON_MASK,
 			     CLK_PERI_PLL_SEL_CPLL << CLK_PERI_PLL_SEL_SHIFT |
@@ -760,6 +793,9 @@ static ulong rk3328_clk_get_rate(struct clk *clk)
 	case SCLK_EMMC_SAMPLE:
 		rate = rk3328_mmc_get_clk(priv, clk->id);
 		break;
+	case SCLK_SPI:
+		rate = rk3328_spi_get_clk(priv);
+		break;
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_I2C0:
 	case SCLK_I2C1:
@@ -837,6 +873,9 @@ static ulong rk3328_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_SDMMC:
 	case SCLK_EMMC:
 		ret = rk3328_mmc_set_clk(priv, clk->id, rate);
+		break;
+	case SCLK_SPI:
+		ret = rk3328_spi_set_clk(priv, rate);
 		break;
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_I2C0:

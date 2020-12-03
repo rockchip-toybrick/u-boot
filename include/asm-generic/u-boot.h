@@ -86,10 +86,13 @@ typedef struct bd_info {
 
 	ulong	        bi_arch_number;	/* unique id for this board */
 	ulong	        bi_boot_params;	/* where this board expects params */
+
+	/* same as android image header 'os_version' */
+	unsigned int	bi_andr_version;
 #ifdef CONFIG_NR_DRAM_BANKS
 	struct {			/* RAM configuration */
-		phys_addr_t start;
-		phys_size_t size;
+		u64 start;
+		u64 size;
 	} bi_dram[CONFIG_NR_DRAM_BANKS];
 #endif /* CONFIG_NR_DRAM_BANKS */
 } bd_t;

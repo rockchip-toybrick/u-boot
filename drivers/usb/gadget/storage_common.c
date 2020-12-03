@@ -309,7 +309,7 @@ static struct fsg_lun *fsg_lun_from_dev(struct device *dev)
 #define FSG_NUM_BUFFERS	2
 
 /* Default size of buffer length. */
-#define FSG_BUFLEN	((u32)131072)
+#define FSG_BUFLEN	((u32)262144)
 
 /* Maximal number of LUNs supported in mass storage function */
 #define FSG_MAX_LUNS	8
@@ -592,6 +592,12 @@ fsg_ep_desc(struct usb_gadget *g, struct usb_endpoint_descriptor *fs,
 	default:
 		speed_desc = fs;
 	}
+
+	/*
+	 * Config the ep maxpacket according to the right descriptors
+	 * for a given endpoint.
+	 */
+	ep->maxpacket = usb_endpoint_maxp(speed_desc) & USB_ENDPOINT_MAXP_MASK;
 
 	return speed_desc;
 }

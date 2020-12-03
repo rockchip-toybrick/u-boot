@@ -40,6 +40,7 @@
 #include <asm/sections.h>
 #include <dm/root.h>
 #include <linux/errno.h>
+#include <bidram.h>
 #include <sysmem.h>
 
 /*
@@ -118,8 +119,8 @@ __weak void board_add_ram_info(int use_default)
 
 static int init_baud_rate(void)
 {
-	if (gd && gd->serial.using_pre_serial)
-		gd->baudrate = env_get_ulong("baudrate", 10, gd->serial.baudrate);
+	if (gd && gd->serial.baudrate)
+		gd->baudrate = gd->serial.baudrate;
 	else
 		gd->baudrate = env_get_ulong("baudrate", 10, CONFIG_BAUDRATE);
 
@@ -147,19 +148,28 @@ static int display_text_info(void)
 	return 0;
 }
 
-#if defined(CONFIG_ROCKCHIP_PRELOADER_SERIAL)
-static int announce_pre_serial(void)
+static int announce_serial(void)
 {
 	if (gd && gd->serial.using_pre_serial)
-		printf("PreSerial: %d\n", gd->serial.id);
+		printf("PreSerial: %d, ", gd->serial.id);
+	else
+		printf("Serial: ");
+
+#ifdef CONFIG_DEBUG_UART_ALWAYS
+	printf("raw");
+#else
+	printf("console");
+#endif
+	printf(", 0x%lx\n", gd->serial.addr);
 
 	return 0;
 }
-#endif
 
 static int announce_dram_init(void)
 {
+#ifndef CONFIG_SUPPORT_USBPLUG
 	puts("DRAM:  ");
+#endif
 	return 0;
 }
 
@@ -184,10 +194,15 @@ static int show_dram_config(void)
 	size = gd->ram_size;
 #endif
 
+#ifdef CONFIG_BIDRAM
+	size += bidram_append_size();
+#endif
+
+#ifndef CONFIG_SUPPORT_USBPLUG
 	print_size(size, "");
 	board_add_ram_info(0);
 	putc('\n');
-
+#endif
 	return 0;
 }
 
@@ -233,12 +248,17 @@ static int setup_mon_len(void)
 	gd->mon_len = (ulong)&_end - (ulong)_init;
 #elif defined(CONFIG_NIOS2) || defined(CONFIG_XTENSA)
 	gd->mon_len = CONFIG_SYS_MONITOR_LEN;
-#elif defined(CONFIG_NDS32) || defined(CONFIG_SH)
+#elif defined(CONFIG_NDS32) || defined(CONFIG_SH) || defined(CONFIG_RISCV)
 	gd->mon_len = (ulong)(&__bss_end) - (ulong)(&_start);
 #elif defined(CONFIG_SYS_MONITOR_BASE)
 	/* TODO: use (ulong)&__bss_end - (ulong)&__text_start; ? */
 	gd->mon_len = (ulong)&__bss_end - CONFIG_SYS_MONITOR_BASE;
 #endif
+	return 0;
+}
+
+__weak int arch_fpga_init(void)
+{
 	return 0;
 }
 
@@ -432,6 +452,23 @@ static int reserve_malloc(void)
 	return 0;
 }
 
+#ifdef CONFIG_SYS_NONCACHED_MEMORY
+static int reserve_noncached(void)
+{
+	phys_addr_t start, end;
+	size_t size;
+
+	end = ALIGN(gd->start_addr_sp, MMU_SECTION_SIZE) - MMU_SECTION_SIZE;
+	size = ALIGN(CONFIG_SYS_NONCACHED_MEMORY, MMU_SECTION_SIZE);
+	start = end - size;
+	gd->start_addr_sp = start;
+	debug("Reserving %zu for noncached_alloc() at: %08lx\n",
+	      size, gd->start_addr_sp);
+
+	return 0;
+}
+#endif
+
 /* (permanently) allocate a Board Info struct */
 static int reserve_board(void)
 {
@@ -597,6 +634,9 @@ static int reloc_fdt(void)
 	if (gd->new_fdt) {
 		memcpy(gd->new_fdt, gd->fdt_blob, gd->fdt_size);
 		gd->fdt_blob = gd->new_fdt;
+#ifdef CONFIG_USING_KERNEL_DTB
+		gd->ufdt_blob = gd->new_fdt;
+#endif
 	}
 #endif
 
@@ -648,7 +688,15 @@ static int setup_reloc(void)
 #endif
 	memcpy(gd->new_gd, (char *)gd, sizeof(gd_t));
 
-	printf("Relocation Offset is: %08lx\n", gd->reloc_off);
+#ifndef CONFIG_SUPPORT_USBPLUG
+	printf("Relocation Offset: %08lx, fdt: %08lx ",
+	      gd->reloc_off, (ulong)gd->new_fdt);
+  #ifdef CONFIG_USING_KERNEL_DTB
+	if (!fdt_check_header((void *)gd->fdt_blob_kern))
+		printf("kfdt: %08lx", (ulong)gd->fdt_blob_kern);
+  #endif
+	puts("\n");
+#endif
 	debug("Relocating to %08lx, new gd at %08lx, sp at %08lx\n",
 	      gd->relocaddr, (ulong)map_to_sysmem(gd->new_gd),
 	      gd->start_addr_sp);
@@ -777,6 +825,7 @@ static const init_fnc_t init_sequence_f[] = {
 #if defined(CONFIG_HAVE_FSP)
 	arch_fsp_init,
 #endif
+	arch_fpga_init,
 	arch_cpu_init,		/* basic arch cpu dependent setup */
 	mach_cpu_init,		/* SoC/machine dependent CPU setup */
 	initf_dm,
@@ -824,9 +873,8 @@ static const init_fnc_t init_sequence_f[] = {
 #if defined(CONFIG_HARD_SPI)
 	init_func_spi,
 #endif
-#if defined(CONFIG_ROCKCHIP_PRELOADER_SERIAL)
-	announce_pre_serial,
-#endif
+	announce_serial,
+
 	announce_dram_init,
 	dram_init,		/* configure available RAM banks */
 #ifdef CONFIG_POST
@@ -866,6 +914,9 @@ static const init_fnc_t init_sequence_f[] = {
 	reserve_trace,
 	reserve_uboot,
 	reserve_malloc,
+#ifdef CONFIG_SYS_NONCACHED_MEMORY
+	reserve_noncached,
+#endif
 	reserve_board,
 	setup_machine,
 	reserve_global_data,
@@ -913,10 +964,6 @@ void board_init_f(ulong boot_flags)
 {
 	gd->flags = boot_flags;
 	gd->have_console = 0;
-
-#if defined(CONFIG_DISABLE_CONSOLE)
-	gd->flags |= GD_FLG_DISABLE_CONSOLE;
-#endif
 
 	if (initcall_run_list(init_sequence_f))
 		hang();

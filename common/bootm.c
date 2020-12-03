@@ -30,6 +30,10 @@
 #include <bootm.h>
 #include <image.h>
 
+#ifdef USE_HOSTCC
+#define CONFIG_SYS_BOOTM_LEN	0x4000000
+#endif
+
 #ifndef CONFIG_SYS_BOOTM_LEN
 /* use 8MByte as default max gunzip size */
 #define CONFIG_SYS_BOOTM_LEN	0x800000
@@ -42,6 +46,16 @@
 DECLARE_GLOBAL_DATA_PTR;
 
 bootm_headers_t images;		/* pointers to os/initrd/fdt images */
+
+__weak int board_do_bootm(int argc, char * const argv[])
+{
+	return 0;
+}
+
+__weak int bootm_board_start(void)
+{
+	return 0;
+}
 
 static const void *boot_get_kernel(cmd_tbl_t *cmdtp, int flag, int argc,
 				   char * const argv[], bootm_headers_t *images,
@@ -86,7 +100,7 @@ static int bootm_start(cmd_tbl_t *cmdtp, int flag, int argc,
 	bootstage_mark_name(BOOTSTAGE_ID_BOOTM_START, "bootm_start");
 	images.state = BOOTM_STATE_START;
 
-	return 0;
+	return bootm_board_start();
 }
 
 static int bootm_find_os(cmd_tbl_t *cmdtp, int flag, int argc,
@@ -299,14 +313,26 @@ static int bootm_find_other(cmd_tbl_t *cmdtp, int flag, int argc,
  * @comp_type:	Compression type being used (IH_COMP_...)
  * @is_xip:	true if the load address matches the image start
  */
-static void print_decomp_msg(int comp_type, int type, bool is_xip)
+static void print_decomp_msg(int comp_type, int type, bool is_xip,
+			     ulong src, ulong dst)
 {
 	const char *name = genimg_get_type_name(type);
+	const char *comp_name[] = {
+		[IH_COMP_NONE]  = "",
+		[IH_COMP_GZIP]  = "GZIP",
+		[IH_COMP_BZIP2] = "BZIP2",
+		[IH_COMP_LZMA]  = "LZMA",
+		[IH_COMP_LZO]   = "LZO",
+		[IH_COMP_LZ4]   = "LZ4",
+		[IH_COMP_ZIMAGE]= "ZIMAGE",
+	};
 
 	if (comp_type == IH_COMP_NONE)
-		printf("   %s %s ... ", is_xip ? "XIP" : "Loading", name);
+		printf("   %s %s from 0x%08lx to 0x%08lx ... ",
+		       is_xip ? "XIP" : "Loading", name, src, dst);
 	else
-		printf("   Uncompressing %s ... ", name);
+		printf("   Uncompressing %s %s from 0x%08lx to 0x%08lx ... ",
+		       comp_name[comp_type], name, src, dst);
 }
 
 /**
@@ -328,7 +354,8 @@ static int handle_decomp_error(int comp_type, size_t uncomp_size,
 	const char *name = genimg_get_comp_name(comp_type);
 
 	if (uncomp_size >= unc_len)
-		printf("Image too large: increase CONFIG_SYS_BOOTM_LEN\n");
+		printf("Image too large(0x%lx >= 0x%lx): increase CONFIG_SYS_BOOTM_LEN\n",
+		       (ulong)uncomp_size, (ulong)unc_len);
 	else
 		printf("%s: uncompress error %d\n", name, ret);
 
@@ -379,7 +406,8 @@ int bootm_decomp_image(int comp, ulong load, ulong image_start, int type,
 	int ret = 0;
 
 	*load_end = load;
-	print_decomp_msg(comp, type, load == image_start);
+	print_decomp_msg(comp, type, load == image_start,
+		(ulong)image_buf, (ulong)load_buf);
 
 	/*
 	 * Load the image to the right place, decompressing if needed. After
@@ -454,7 +482,10 @@ int bootm_decomp_image(int comp, ulong load, ulong image_start, int type,
 		return handle_decomp_error(comp, image_len, unc_len, ret);
 	*load_end = load + image_len;
 
-	puts("OK\n");
+	if (comp == IH_COMP_NONE || comp == IH_COMP_ZIMAGE)
+		puts("OK\n");
+	else
+		printf("with %08lx bytes OK\n", image_len);
 
 	return 0;
 }
@@ -520,6 +551,13 @@ static int bootm_load_os(bootm_headers_t *images, unsigned long *load_end,
 ulong bootm_disable_interrupts(void)
 {
 	ulong iflag;
+
+	/*
+	 * Do not go further if usb is boot device,
+	 * We may access usb at late sequence.
+	 */
+	if (!strcmp(env_get("devtype"), "usb"))
+		return 0;
 
 	/*
 	 * We have reached the point of no return: we are going to
@@ -945,7 +983,7 @@ void memmove_wd(void *to, void *from, size_t len, ulong chunksz)
 	memmove(to, from, len);
 }
 
-static int bootm_host_load_image(const void *fit, int req_image_type)
+static int bootm_host_load_image(const void *fit, int req_image_type, int index)
 {
 	const char *fit_uname_config = NULL;
 	ulong data, len;
@@ -959,9 +997,9 @@ static int bootm_host_load_image(const void *fit, int req_image_type)
 
 	memset(&images, '\0', sizeof(images));
 	images.verify = 1;
-	noffset = fit_image_load(&images, (ulong)fit,
+	noffset = fit_image_load_index(&images, (ulong)fit,
 		NULL, &fit_uname_config,
-		IH_ARCH_DEFAULT, req_image_type, -1,
+		IH_ARCH_DEFAULT, req_image_type, index, -1,
 		FIT_LOAD_IGNORED, &data, &len);
 	if (noffset < 0)
 		return noffset;
@@ -988,20 +1026,50 @@ static int bootm_host_load_image(const void *fit, int req_image_type)
 	return 0;
 }
 
-int bootm_host_load_images(const void *fit, int cfg_noffset)
+int bootm_host_load_images(const void *fit, int cfg_noffset, int is_spl)
 {
 	static uint8_t image_types[] = {
 		IH_TYPE_KERNEL,
 		IH_TYPE_FLATDT,
 		IH_TYPE_RAMDISK,
 	};
+#ifdef CONFIG_SPL_ATF
+	static uint8_t image_types_spl[] = {
+		IH_TYPE_FLATDT,
+		IH_TYPE_FIRMWARE,
+		IH_TYPE_LOADABLE,
+		IH_TYPE_LOADABLE,
+		IH_TYPE_LOADABLE,
+	};
+#else
+	static uint8_t image_types_spl[] = {
+		IH_TYPE_FLATDT,
+		IH_TYPE_FIRMWARE,
+		IH_TYPE_LOADABLE,
+	};
+#endif
+	int loadable_index = 0;
 	int err = 0;
+	int index;
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(image_types); i++) {
+	for (i = 0; !is_spl && i < ARRAY_SIZE(image_types); i++) {
 		int ret;
 
-		ret = bootm_host_load_image(fit, image_types[i]);
+		ret = bootm_host_load_image(fit, image_types[i], 0);
+		if (!err && ret && ret != -ENOENT)
+			err = ret;
+	}
+
+	for (i = 0; is_spl && i < ARRAY_SIZE(image_types_spl); i++) {
+		int ret;
+
+		if (image_types_spl[i] == IH_TYPE_LOADABLE)
+			index = loadable_index++;
+		else
+			index = 0;
+
+		ret = bootm_host_load_image(fit, image_types_spl[i], index);
 		if (!err && ret && ret != -ENOENT)
 			err = ret;
 	}

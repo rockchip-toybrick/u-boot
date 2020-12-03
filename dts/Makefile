@@ -32,27 +32,56 @@ fdtgrep_props := -b u-boot,dm-pre-reloc -b u-boot,dm-tpl
 else
 fdtgrep_props := -b u-boot,dm-pre-reloc -b u-boot,dm-spl
 endif
+
 quiet_cmd_fdtgrep = FDTGREP $@
       cmd_fdtgrep = $(objtree)/tools/fdtgrep $(fdtgrep_props) -RT $< \
+                -n /chosen -n /config -O dtb | \
+        $(objtree)/tools/fdtgrep -r -O dtb - -o $@ \
+                $(addprefix -P ,$(subst $\",,$(CONFIG_OF_SPL_REMOVE_PROPS)))
+
+quiet_cmd_fdtgrep_uboot = FDTGREP $@
+      cmd_fdtgrep_uboot = $(objtree)/tools/fdtgrep $(fdtgrep_props) -RT $< \
 		-n /chosen -n /config -O dtb | \
 	$(objtree)/tools/fdtgrep -r -O dtb - -o $@ \
-		$(addprefix -P ,$(subst $\",,$(CONFIG_OF_SPL_REMOVE_PROPS)))
+		$(addprefix -P ,$(subst $\",,$(CONFIG_OF_U_BOOT_REMOVE_PROPS)))
 
 fdtgrep_tpl_props := -b u-boot,dm-pre-reloc -b u-boot,dm-tpl
 quiet_cmd_fdtgrep_tpl = FDTGREP $@
       cmd_fdtgrep_tpl = $(objtree)/tools/fdtgrep $(fdtgrep_tpl_props) -RT $< \
-                -n /config -O dtb | \
+                -n /chosen -n config -O dtb | \
+        $(objtree)/tools/fdtgrep -r -O dtb - -o $@ \
+                $(addprefix -P ,$(subst $\",,$(CONFIG_OF_SPL_REMOVE_PROPS)))
+
+fdtgrep_spl_minimum_props := -b u-boot,dm-spl
+quiet_cmd_fdtgrep_spl_minimum = FDTGREP $@
+      cmd_fdtgrep_spl_minimum = $(objtree)/tools/fdtgrep $(fdtgrep_spl_minimum_props) -RT $< \
+                -n /chosen -n config -O dtb | \
         $(objtree)/tools/fdtgrep -r -O dtb - -o $@ \
                 $(addprefix -P ,$(subst $\",,$(CONFIG_OF_SPL_REMOVE_PROPS)))
 
 $(obj)/dt-tpl.dtb: $(DTB) $(objtree)/tools/fdtgrep FORCE
 	$(call if_changed,fdtgrep_tpl)
 
+ifeq ($(CONFIG_SPL_DTB_MINIMUM),y)
+$(obj)/dt-spl.dtb: $(DTB) $(objtree)/tools/fdtgrep FORCE
+	$(call if_changed,fdtgrep_spl_minimum)
+else
 $(obj)/dt-spl.dtb: $(DTB) $(objtree)/tools/fdtgrep FORCE
 	$(call if_changed,fdtgrep)
+endif
 
+# Normally, usbplug is enabled with kernel dtb disabled
+ifneq ($(CONFIG_USING_KERNEL_DTB)$(CONFIG_SUPPORT_USBPLUG),)
+$(obj)/dt.dtb: $(DTB) $(objtree)/tools/fdtgrep FORCE
+ifneq ($(CONFIG_OF_U_BOOT_REMOVE_PROPS), "")
+	$(call if_changed,fdtgrep_uboot)
+else
+	$(call if_changed,fdtgrep)
+endif
+else
 $(obj)/dt.dtb: $(DTB) FORCE
 	$(call if_changed,shipped)
+endif
 
 targets += dt.dtb dt-spl.dtb dt-tpl.dtb
 

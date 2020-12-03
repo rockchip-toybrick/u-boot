@@ -417,6 +417,18 @@ struct dm_mmc_ops {
 			struct mmc_data *data);
 
 	/**
+	 * send_cmd_prepare() - Send a command to the MMC device
+	 *
+	 * @dev:	Device to receive the command
+	 * @cmd:	Command to send
+	 * @data:	Additional data to send/receive
+	 * @return 0 if OK, -ve on error
+	 */
+#ifdef CONFIG_SPL_BLK_READ_PREPARE
+	int (*send_cmd_prepare)(struct udevice *dev, struct mmc_cmd *cmd,
+				struct mmc_data *data);
+#endif
+	/**
 	 * card_busy() - Query the card device status
 	 *
 	 * @dev:	Device to update
@@ -765,6 +777,13 @@ int mmc_get_env_dev(void);
  * @return block device if found, else NULL
  */
 struct blk_desc *mmc_get_blk_desc(struct mmc *mmc);
+
+
+/**
+ * mmc_gpio_init_direct()
+ *
+ */
+void mmc_gpio_init_direct(void);
 
 #endif /* _MMC_H_ */
 

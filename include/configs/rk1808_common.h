@@ -33,6 +33,14 @@
 #define CONFIG_BOUNCE_BUFFER
 #define CONFIG_SUPPORT_EMMC_RPMB
 
+/* Nand */
+#define CONFIG_SYS_MAX_NAND_DEVICE	1
+#define CONFIG_SYS_NAND_ONFI_DETECTION
+#define CONFIG_SYS_NAND_PAGE_SIZE	2048
+#define CONFIG_SYS_NAND_PAGE_COUNT	64
+#define CONFIG_SYS_NAND_SIZE		(256 * 1024 * 1024)
+#define CONFIG_SYS_NAND_U_BOOT_OFFS	0x4000
+
 #define CONFIG_SYS_SDRAM_BASE		0
 #define SDRAM_MAX_SIZE			0xf8000000
 #define SDRAM_BANK_SIZE			(2UL << 30)
@@ -53,13 +61,6 @@
 	"ramdisk_addr_r=0x0a200000\0"
 
 #include <config_distro_bootcmd.h>
-
-#ifdef CONFIG_DM_RAMDISK
-#undef RKIMG_DET_BOOTDEV
-#define RKIMG_DET_BOOTDEV \
-	"rkimg_bootdev=" \
-	"setenv devtype ramdisk; setenv devnum 0; \0"
-#endif
 
 #define CONFIG_EXTRA_ENV_SETTINGS \
 	ENV_MEM_LAYOUT_SETTINGS \

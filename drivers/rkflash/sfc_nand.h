@@ -7,16 +7,18 @@
 #ifndef __SFC_NAND_H
 #define __SFC_NAND_H
 
-#define SFC_NAND_STRESS_TEST_EN		0
+#include "flash_com.h"
 
-#define SFC_NAND_PROG_ERASE_ERROR	-2
-#define SFC_NAND_HW_ERROR		-1
+#define SFC_NAND_WAIT_TIME_OUT		3
+#define SFC_NAND_PROG_ERASE_ERROR	2
+#define SFC_NAND_HW_ERROR		1
 #define SFC_NAND_ECC_ERROR		NAND_ERROR
 #define SFC_NAND_ECC_REFRESH		NAND_STS_REFRESH
 #define SFC_NAND_ECC_OK			NAND_STS_OK
 
 #define SFC_NAND_PAGE_MAX_SIZE		4224
 #define SFC_NAND_SECTOR_FULL_SIZE	528
+#define SFC_NAND_SECTOR_SIZE		512
 
 #define FEA_READ_STATUE_MASK    (0x3 << 0)
 #define FEA_STATUE_MODE1        0
@@ -26,14 +28,6 @@
 #define FEA_4BYTE_ADDR          BIT(4)
 #define FEA_4BYTE_ADDR_MODE	BIT(5)
 #define FEA_SOFT_QOP_BIT	BIT(6)
-
-#define MID_WINBOND             0xEF
-#define MID_GIGADEV             0xC8
-#define MID_MICRON              0x2C
-#define MID_MACRONIX            0xC2
-#define MID_SPANSION            0x01
-#define MID_EON                 0x1C
-#define MID_ST                  0x20
 
 /* Command Set */
 #define CMD_READ_JEDECID        (0x9F)
@@ -91,31 +85,30 @@ struct SFNAND_DEV {
 	u8 page_prog_cmd;
 };
 
+struct nand_mega_area {
+	u8 off0;
+	u8 off1;
+	u8 off2;
+	u8 off3;
+};
+
 struct nand_info {
-	u32 id;
+	u8 id0;
+	u8 id1;
+	u8 id2;
 
 	u16 sec_per_page;
 	u16 page_per_blk;
 	u16 plane_per_die;
 	u16 blk_per_plane;
 
-	u8 page_read_cmd;
-	u8 page_prog_cmd;
-	u8 read_cache_cmd_1;
-	u8 prog_cache_cmd_1;
-
-	u8 read_cache_cmd_4;
-	u8 prog_cache_cmd_4;
-	u8 block_erase_cmd;
 	u8 feature;
 
 	u8 density;  /* (1 << density) sectors*/
 	u8 max_ecc_bits;
-	u8 QE_address;
-	u8 QE_bits;
+	u8 has_qe_bits;
 
-	u8 spare_offs_1;	/* 4/8 bytes for 2KB/4KB page size flash */
-	u8 spare_offs_2;	/* 4/8 bytes for 2KB/4KB page size flash */
+	struct nand_mega_area meta;
 	u32 (*ecc_status)(void);
 };
 
@@ -125,10 +118,14 @@ extern struct nand_ops		g_nand_ops;
 u32 sfc_nand_init(void);
 void sfc_nand_deinit(void);
 int sfc_nand_read_id(u8 *buf);
-u32 sfc_nand_ecc_status_sp1(void);
-u32 sfc_nand_ecc_status_sp2(void);
-u32 sfc_nand_ecc_status_sp3(void);
-u32 sfc_nand_ecc_status_sp4(void);
-u32 sfc_nand_ecc_status_sp5(void);
+u32 sfc_nand_erase_block(u8 cs, u32 addr);
+u32 sfc_nand_prog_page(u8 cs, u32 addr, u32 *p_data, u32 *p_spare);
+u32 sfc_nand_read_page(u8 cs, u32 addr, u32 *p_data, u32 *p_spare);
+u32 sfc_nand_prog_page_raw(u8 cs, u32 addr, u32 *p_page_buf);
+u32 sfc_nand_read_page_raw(u8 cs, u32 addr, u32 *p_page_buf);
+u32 sfc_nand_check_bad_block(u8 cs, u32 addr);
+u32 sfc_nand_mark_bad_block(u8 cs, u32 addr);
+void sfc_nand_ftl_ops_init(void);
+struct SFNAND_DEV *sfc_nand_get_private_dev(void);
 
 #endif

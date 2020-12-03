@@ -83,6 +83,57 @@ static struct rockchip_pll_clock rk3308_pll_clks[] = {
 		      RK3308_MODE_CON, 6, 10, 0, NULL),
 };
 
+/*
+ *
+ * rational_best_approximation(31415, 10000,
+ *		(1 << 8) - 1, (1 << 5) - 1, &n, &d);
+ *
+ * you may look at given_numerator as a fixed point number,
+ * with the fractional part size described in given_denominator.
+ *
+ * for theoretical background, see:
+ * http://en.wikipedia.org/wiki/Continued_fraction
+ */
+static void rational_best_approximation(unsigned long given_numerator,
+					unsigned long given_denominator,
+					unsigned long max_numerator,
+					unsigned long max_denominator,
+					unsigned long *best_numerator,
+					unsigned long *best_denominator)
+{
+	unsigned long n, d, n0, d0, n1, d1;
+
+	n = given_numerator;
+	d = given_denominator;
+	n0 = 0;
+	d1 = 0;
+	n1 = 1;
+	d0 = 1;
+	for (;;) {
+		unsigned long t, a;
+
+		if (n1 > max_numerator || d1 > max_denominator) {
+			n1 = n0;
+			d1 = d0;
+			break;
+		}
+		if (d == 0)
+			break;
+		t = d;
+		a = n / d;
+		d = n % d;
+		n = t;
+		t = n0 + a * n1;
+		n0 = n1;
+		n1 = t;
+		t = d0 + a * d1;
+		d0 = d1;
+		d1 = t;
+	}
+	*best_numerator = n1;
+	*best_denominator = d1;
+}
+
 static ulong rk3308_armclk_set_clk(struct rk3308_clk_priv *priv, ulong hz)
 {
 	struct rk3308_cru *cru = priv->cru;
@@ -800,6 +851,81 @@ static ulong rk3308_crypto_set_clk(struct rk3308_clk_priv *priv, ulong clk_id,
 	return rk3308_crypto_get_clk(priv, clk_id);
 }
 
+static ulong rk3308_rtc32k_get_clk(struct rk3308_clk_priv *priv, ulong clk_id)
+{
+	struct rk3308_cru *cru = priv->cru;
+	unsigned long m, n;
+	u32 con, fracdiv;
+
+	con = readl(&cru->clksel_con[2]);
+	if ((con & CLK_RTC32K_SEL_MASK) >> CLK_RTC32K_SEL_SHIFT !=
+	    CLK_RTC32K_FRAC_DIV)
+		return -EINVAL;
+
+	fracdiv = readl(&cru->clksel_con[3]);
+	m = fracdiv & CLK_RTC32K_FRAC_NUMERATOR_MASK;
+	m >>= CLK_RTC32K_FRAC_NUMERATOR_SHIFT;
+	n = fracdiv & CLK_RTC32K_FRAC_DENOMINATOR_MASK;
+	n >>= CLK_RTC32K_FRAC_DENOMINATOR_SHIFT;
+
+	return OSC_HZ * m / n;
+}
+
+static ulong rk3308_rtc32k_set_clk(struct rk3308_clk_priv *priv, ulong clk_id,
+				   ulong hz)
+{
+	struct rk3308_cru *cru = priv->cru;
+	unsigned long m, n, val;
+
+	rational_best_approximation(hz, OSC_HZ,
+				    GENMASK(16 - 1, 0),
+				    GENMASK(16 - 1, 0),
+				    &m, &n);
+	val = m << CLK_RTC32K_FRAC_NUMERATOR_SHIFT | n;
+	writel(val, &cru->clksel_con[3]);
+	rk_clrsetreg(&cru->clkgate_con[2], CLK_RTC32K_SEL_MASK,
+		     CLK_RTC32K_FRAC_DIV << CLK_RTC32K_SEL_SHIFT);
+
+	return rk3308_rtc32k_get_clk(priv, clk_id);
+}
+
+static ulong rk3308_sclk_sfc_get_clk(struct rk3308_clk_priv *priv)
+{
+	struct rk3308_cru *cru = priv->cru;
+	u32 div, con, sel, parent;
+
+	con = readl(&cru->clksel_con[42]);
+	div = (con & SCLK_SFC_DIV_MASK) >> SCLK_SFC_DIV_SHIFT;
+	sel = (con & SCLK_SFC_SEL_MASK) >> SCLK_SFC_SEL_SHIFT;
+
+	if (sel == SCLK_SFC_SEL_DPLL)
+		parent = priv->dpll_hz;
+	else if (sel == SCLK_SFC_SEL_VPLL0)
+		parent = priv->vpll0_hz;
+	else if (sel == SCLK_SFC_SEL_VPLL1)
+		parent = priv->vpll1_hz;
+	else
+		return -EINVAL;
+
+	return DIV_TO_RATE(parent, div);
+}
+
+static ulong rk3308_sclk_sfc_set_clk(struct rk3308_clk_priv *priv, uint hz)
+{
+	struct rk3308_cru *cru = priv->cru;
+	int src_clk_div;
+
+	src_clk_div = DIV_ROUND_UP(priv->vpll0_hz, hz);
+	assert(src_clk_div - 1 <= 127);
+
+	rk_clrsetreg(&cru->clksel_con[42],
+		     SCLK_SFC_SEL_MASK | SCLK_SFC_DIV_MASK,
+		     SCLK_SFC_SEL_VPLL0 << SCLK_SFC_SEL_SHIFT |
+		     (src_clk_div - 1) << SCLK_SFC_DIV_SHIFT);
+
+	return rk3308_sclk_sfc_get_clk(priv);
+}
+
 static ulong rk3308_clk_get_rate(struct clk *clk)
 {
 	struct rk3308_clk_priv *priv = dev_get_priv(clk->dev);
@@ -872,6 +998,12 @@ static ulong rk3308_clk_get_rate(struct clk *clk)
 	case SCLK_CRYPTO:
 	case SCLK_CRYPTO_APK:
 		rate = rk3308_crypto_get_clk(priv, clk->id);
+		break;
+	case SCLK_RTC32K:
+		rate = rk3308_rtc32k_get_clk(priv, clk->id);
+		break;
+	case SCLK_SFC:
+		rate = rk3308_sclk_sfc_get_clk(priv);
 		break;
 	default:
 		return -ENOENT;
@@ -950,6 +1082,12 @@ static ulong rk3308_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_CRYPTO:
 	case SCLK_CRYPTO_APK:
 		ret = rk3308_crypto_set_clk(priv, clk->id, rate);
+		break;
+	case SCLK_RTC32K:
+		ret = rk3308_rtc32k_set_clk(priv, clk->id, rate);
+		break;
+	case SCLK_SFC:
+		ret = rk3308_sclk_sfc_set_clk(priv, rate);
 		break;
 	default:
 		return -ENOENT;

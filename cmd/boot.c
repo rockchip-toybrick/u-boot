@@ -64,7 +64,7 @@ U_BOOT_CMD(
 	"      passing 'arg' as arguments"
 );
 
-U_BOOT_CMD(
+U_BOOT_CMD_ALWAYS(
 	rbrom, 1, 0,	do_reboot_brom,
 	"Perform RESET of the CPU",
 	""
@@ -73,8 +73,14 @@ U_BOOT_CMD(
 #endif
 
 U_BOOT_CMD(
-        reset, 1, 0,    do_reset,
+        reset, 2, 0,    do_reset,
         "Perform RESET of the CPU",
+        ""
+);
+
+U_BOOT_CMD(
+        reboot, 2, 0,    do_reset,
+        "Perform RESET of the CPU, alias of 'reset'",
         ""
 );
 

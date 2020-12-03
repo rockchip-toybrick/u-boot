@@ -37,6 +37,25 @@ struct rockchip_dwmmc_priv {
 	u32 minmax[2];
 };
 
+#ifdef CONFIG_USING_KERNEL_DTB
+int board_mmc_dm_reinit(struct udevice *dev)
+{
+	struct rockchip_dwmmc_priv *priv = dev_get_priv(dev);
+
+	if (!priv || !&priv->clk)
+		return 0;
+
+	if (!memcmp(dev->name, "dwmmc", strlen("dwmmc")))
+		return clk_get_by_index(dev, 0, &priv->clk);
+	else
+		return 0;
+}
+#endif
+
+#ifdef CONFIG_SPL_BUILD
+__weak void mmc_gpio_init_direct(void) {}
+#endif
+
 static uint rockchip_dwmmc_get_mmc_clk(struct dwmci_host *host, uint freq)
 {
 	struct udevice *dev = host->priv;
@@ -158,6 +177,9 @@ static int rockchip_dwmmc_probe(struct udevice *dev)
 	struct udevice *pwr_dev __maybe_unused;
 	int ret;
 
+#ifdef CONFIG_SPL_BUILD
+	mmc_gpio_init_direct();
+#endif
 #if CONFIG_IS_ENABLED(OF_PLATDATA)
 	struct dtd_rockchip_rk3288_dw_mshc *dtplat = &plat->dtplat;
 

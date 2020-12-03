@@ -59,6 +59,12 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 				if (!strcmp(name, dev->name)) {
 					debug("%s do not bind dev already in list %s\n",
 					      __func__, dev->name);
+					/*
+					 * There is no clearly reason for this
+					 * legacy code, but remain it here since
+					 * everything seems fine with or without
+					 * this. Maybe removed in the future.
+					 */
 					dev->node = node;
 					return 0;
 				}
@@ -70,14 +76,16 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 
 		list_for_each_entry_safe(dev, n, &uc->dev_head, uclass_node) {
 			if (!strcmp(name, dev->name) &&
-			    dev_read_bool(dev, "u-boot,dm-pre-reloc")) {
-				if (drv->id == UCLASS_SERIAL || drv->id == UCLASS_CRYPTO) {
-					/* Always use serial node from U-Boot dtb */
+			    (dev_read_bool(dev, "u-boot,dm-pre-reloc") ||
+			     dev_read_bool(dev, "u-boot,dm-spl"))) {
+
+				/* Always use crypto node from U-Boot dtb */
+				if (drv->id == UCLASS_CRYPTO) {
 					debug("%s do not delete uboot dev: %s\n",
 					      __func__, dev->name);
 					return 0;
 				} else {
-					list_del(&dev->uclass_node);
+					list_del_init(&dev->uclass_node);
 				}
 			}
 		}

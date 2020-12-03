@@ -23,6 +23,8 @@
 		serial2 = &uart2;
 		serial3 = &uart3;
 		serial4 = &uart4;
+		mmc0 = &emmc;
+		mmc1 = &sdmmc;
 	};
 
 	cpus {
@@ -861,7 +863,7 @@
 			};
 		};
 
-		sdmmc {
+		sdmmc_pin: sdmmc_pin {
 			sdmmc_clk: sdmmc-clk {
 				rockchip,pins =
 					<4 RK_PD5 1 &pcfg_pull_none_4ma>;

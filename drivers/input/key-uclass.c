@@ -162,7 +162,7 @@ try_again:
 	return event;
 }
 
-#ifdef CONFIG_IRQ
+#if defined(CONFIG_IRQ) && !defined(CONFIG_SPL_BUILD)
 #if defined(CONFIG_PWRKEY_DNL_TRIGGER_NUM) && \
 		(CONFIG_PWRKEY_DNL_TRIGGER_NUM > 0)
 static void power_key_download(struct dm_key_uclass_platdata *uc_key)
@@ -263,7 +263,8 @@ static int key_post_probe(struct udevice *dev)
 		return -ENXIO;
 
 	/* True from U-Boot key node */
-	uc_key->pre_reloc = dev_read_bool(dev, "u-boot,dm-pre-reloc");
+	uc_key->pre_reloc = dev_read_bool(dev, "u-boot,dm-pre-reloc") ||
+			    dev_read_bool(dev, "u-boot,dm-spl");
 
 	if (uc_key->type == ADC_KEY) {
 		uc_key->max = uc_key->adcval + margin;
@@ -271,7 +272,7 @@ static int key_post_probe(struct udevice *dev)
 					uc_key->adcval - margin : 0;
 	} else {
 		if (uc_key->code == KEY_POWER) {
-#ifdef CONFIG_IRQ
+#if defined(CONFIG_IRQ) && !defined(CONFIG_SPL_BUILD)
 			int irq;
 
 			if (uc_key->skip_irq_init)

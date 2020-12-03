@@ -90,6 +90,8 @@ static int charge_animation_ofdata_to_platdata(struct udevice *dev)
 	pdata->android_charge =
 		dev_read_u32_default(dev, "rockchip,android-charge-on", 0);
 
+	pdata->auto_exit_charge =
+		dev_read_u32_default(dev, "rockchip,uboot-exit-charge-auto", 0);
 	pdata->exit_charge_level =
 		dev_read_u32_default(dev, "rockchip,uboot-exit-charge-level", 0);
 	pdata->exit_charge_voltage =
@@ -113,6 +115,9 @@ static int charge_animation_ofdata_to_platdata(struct udevice *dev)
 
 	if (pdata->screen_on_voltage > pdata->exit_charge_voltage)
 		pdata->screen_on_voltage = pdata->exit_charge_voltage;
+
+	if (pdata->auto_exit_charge && !pdata->auto_wakeup_interval)
+		pdata->auto_wakeup_interval = 10;
 
 	debug("mode: uboot=%d, android=%d; exit: soc=%d%%, voltage=%dmv;\n"
 	      "lp_voltage=%d%%, screen_on=%dmv\n",
@@ -155,7 +160,9 @@ static int check_key_press(struct udevice *dev)
 				state = KEY_PRESS_DOWN;
 			}
 		}
-	} else if (pdata->auto_off_screen_interval) {
+	}
+	if (!pdata->auto_wakeup_screen_invert &&
+	    pdata->auto_off_screen_interval) {
 		if (priv->auto_screen_off_timeout &&
 		    get_timer(priv->auto_screen_off_timeout) >
 		    pdata->auto_off_screen_interval * 1000) {	/* 1000ms */
@@ -433,6 +440,7 @@ static int charge_animation_show(struct udevice *dev)
 	int i, charging = 1, ret;
 	int boot_mode;
 	int first_poll_fg = 1;
+	bool exit_charge = false;
 
 /*
  * Check sequence:
@@ -472,9 +480,31 @@ static int charge_animation_show(struct udevice *dev)
 		return 0;
 	}
 #endif
+	charging = fg_charger_get_chrg_online(dev);
+	/* Not charger online and low power, shutdown */
+	if (charging <= 0 && pdata->auto_exit_charge) {
+		soc = fuel_gauge_update_get_soc(fg);
+		voltage = fuel_gauge_get_voltage(fg);
+		if (soc < pdata->exit_charge_level) {
+			printf("soc(%d%%) < exit_charge_level(%d%%)\n",
+			       soc, pdata->exit_charge_level);
+			exit_charge = true;
+		}
+		if (voltage < pdata->exit_charge_voltage) {
+			printf("voltage(%d) < exit_charge_voltage(%d)\n",
+			       voltage, pdata->exit_charge_voltage);
+			exit_charge = true;
+		}
+		if (exit_charge) {
+			printf("Not charging and low power, Shutdown...\n");
+			show_idx = IMAGE_LOWPOWER_IDX(image_num);
+			charge_show_bmp(image[show_idx].name);
+			mdelay(1000);
+			pmic_shutdown(pmic);
+		}
+	}
 
 	/* Not charger online, exit */
-	charging = fg_charger_get_chrg_online(dev);
 	if (charging <= 0) {
 		printf("Exit charge: due to charger offline\n");
 		return 0;
@@ -581,6 +611,22 @@ static int charge_animation_show(struct udevice *dev)
 
 		first_poll_fg = 0;
 		local_irq_enable();
+
+		if (pdata->auto_exit_charge) {
+			/* Is able to boot now ? */
+			if (pdata->exit_charge_level &&
+			    soc >= pdata->exit_charge_level) {
+				printf("soc(%d%%) exit charge animation...\n",
+				       soc);
+				break;
+			}
+			if (pdata->exit_charge_voltage &&
+			    voltage >= pdata->exit_charge_voltage) {
+				printf("vol(%d) exit charge animation...\n",
+				       voltage);
+				break;
+			}
+		}
 
 show_images:
 		/*

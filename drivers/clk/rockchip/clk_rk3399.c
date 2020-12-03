@@ -1002,7 +1002,6 @@ static ulong rk3399_tsadc_set_clk(struct rk3399_cru *cru, uint hz)
 	return rk3399_tsadc_get_clk(cru);
 }
 
-#ifndef CONFIG_SPL_BUILD
 static ulong rk3399_crypto_get_clk(struct rk3399_clk_priv *priv, ulong clk_id)
 {
 	struct rk3399_cru *cru = priv->cru;
@@ -1060,6 +1059,7 @@ static ulong rk3399_crypto_set_clk(struct rk3399_clk_priv *priv, ulong clk_id,
 	return rk3399_crypto_get_clk(priv, clk_id);
 }
 
+#ifndef CONFIG_SPL_BUILD
 static ulong rk3399_peri_get_clk(struct rk3399_clk_priv *priv, ulong clk_id)
 {
 	struct rk3399_cru *cru = priv->cru;
@@ -1184,11 +1184,11 @@ static ulong rk3399_clk_get_rate(struct clk *clk)
 	case SCLK_TSADC:
 		rate = rk3399_tsadc_get_clk(priv->cru);
 		break;
-#ifndef CONFIG_SPL_BUILD
 	case SCLK_CRYPTO0:
 	case SCLK_CRYPTO1:
 		rate = rk3399_crypto_get_clk(priv, clk->id);
 		break;
+#ifndef CONFIG_SPL_BUILD
 	case ACLK_PERIHP:
 	case HCLK_PERIHP:
 	case PCLK_PERIHP:
@@ -1275,12 +1275,10 @@ static ulong rk3399_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_TSADC:
 		ret = rk3399_tsadc_set_clk(priv->cru, rate);
 		break;
-#ifndef CONFIG_SPL_BUILD
 	case SCLK_CRYPTO0:
 	case SCLK_CRYPTO1:
 		ret = rk3399_crypto_set_clk(priv, clk->id, rate);
 		break;
-#endif
 	default:
 		return -ENOENT;
 	}
@@ -1373,6 +1371,10 @@ static int rk3399_clk_enable(struct clk *clk)
 	case HCLK_HOST1:
 	case HCLK_HOST1_ARB:
 	case SCLK_USBPHY1_480M_SRC:
+	case ACLK_USB3OTG1:
+	case ACLK_USB3_GRF:
+	case SCLK_USB3OTG1_REF:
+	case SCLK_USB3OTG1_SUSPEND:
 		return 0;
 	}
 
@@ -1396,6 +1398,7 @@ static void rkclk_init(struct rk3399_cru *cru)
 	u32 pclk_div;
 
 	rk3399_configure_cpu(cru, APLL_816_MHZ, CPU_CLUSTER_LITTLE);
+	rk3399_configure_cpu(cru, APLL_816_MHZ, CPU_CLUSTER_BIG);
 
 	/*
 	 * some cru registers changed by bootrom, we'd better reset them to

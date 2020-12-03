@@ -82,6 +82,18 @@ void __weak spl_perform_fixups(struct spl_image_info *spl_image)
 {
 }
 
+/* Get the next stage process */
+__weak void spl_next_stage(struct spl_image_info *spl)
+{
+	spl->next_stage = SPL_NEXT_STAGE_UBOOT;
+}
+
+/* Weak default function for arch/board-specific preppare before jumping */
+int __weak spl_board_prepare_for_jump(struct spl_image_info *spl_image)
+{
+	return 0;
+}
+
 void spl_fixup_fdt(void)
 {
 #if defined(CONFIG_SPL_OF_LIBFDT) && defined(CONFIG_SYS_SPL_ARGS_ADDR)
@@ -221,6 +233,45 @@ __weak void __noreturn jump_to_image_no_args(struct spl_image_info *spl_image)
 	image_entry();
 }
 
+/*
+ * 64-bit: No special operation.
+ *
+ * 32-bit: Initial gd->bd->bi_dram[] to active dcache attr of memory.
+ *	   Assuming 256MB is enough for SPL(MMU still maps 4GB size).
+ */
+#ifndef CONFIG_SPL_SYS_DCACHE_OFF
+static int spl_dcache_enable(void)
+{
+	bool free_bd = false;
+
+#ifndef CONFIG_ARM64
+	if (!gd->bd) {
+		gd->bd = calloc(1, sizeof(bd_t));
+		if (!gd->bd) {
+			debug("spl: no bd_t memory\n");
+			return -ENOMEM;
+		}
+		gd->bd->bi_dram[0].start = CONFIG_SYS_SDRAM_BASE;
+		gd->bd->bi_dram[0].size  = SZ_256M;
+		free_bd = true;
+	}
+#endif
+	/* TLB memory should be SZ_16K base align and 4KB end align */
+	gd->arch.tlb_size = PGTABLE_SIZE;
+	gd->arch.tlb_addr = (ulong)memalign(SZ_16K, ALIGN(PGTABLE_SIZE, SZ_4K));
+	if (!gd->arch.tlb_addr) {
+		debug("spl: no TLB memory\n");
+		return -ENOMEM;
+	}
+
+	dcache_enable();
+	if (free_bd)
+		free(gd->bd);
+
+	return 0;
+}
+#endif
+
 static int spl_common_init(bool setup_malloc)
 {
 	int ret;
@@ -234,6 +285,18 @@ static int spl_common_init(bool setup_malloc)
 #endif
 		gd->malloc_limit = CONFIG_VAL(SYS_MALLOC_F_LEN);
 		gd->malloc_ptr = 0;
+	}
+#endif
+
+	/*
+	 * setup D-cache as early as possible after malloc setup
+	 * I-cache has been setup at early assembly code by default.
+	 */
+#ifndef CONFIG_SPL_SYS_DCACHE_OFF
+	ret = spl_dcache_enable();
+	if (ret) {
+		debug("spl_dcache_enable() return error %d\n", ret);
+		return ret;
 	}
 #endif
 	ret = bootstage_init(true);
@@ -472,12 +535,17 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	spl_image.entry_point_bl33 = CONFIG_SYS_TEXT_BASE;
 #endif
 
+#if CONFIG_IS_ENABLED(OPTEE)
+	/* default address */
+	spl_image.entry_point_os = CONFIG_SYS_TEXT_BASE;
+#endif
+
 #ifdef CONFIG_SYS_SPL_ARGS_ADDR
 	spl_image.arg = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
 #endif
 	spl_image.boot_device = BOOT_DEVICE_NONE;
 	board_boot_order(spl_boot_list);
-
+	spl_next_stage(&spl_image);
 	if (boot_from_devices(&spl_image, spl_boot_list,
 			      ARRAY_SIZE(spl_boot_list))) {
 		puts("SPL: failed to boot from all boot devices\n");
@@ -495,14 +563,24 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 		break;
 #if CONFIG_IS_ENABLED(ATF)
 	case IH_OS_ARM_TRUSTED_FIRMWARE:
-		printf("Jumping to U-Boot via ARM Trusted Firmware\n\n");
+		printf("Jumping to %s(0x%08lx) via ARM Trusted Firmware(0x%08lx)\n",
+		       spl_image.next_stage == SPL_NEXT_STAGE_UBOOT ? "U-Boot" :
+		       (spl_image.next_stage == SPL_NEXT_STAGE_KERNEL ? "Kernel" : "Unknown"),
+		       (ulong)spl_image.entry_point_bl33,
+		       (ulong)spl_image.entry_point);
 		spl_invoke_atf(&spl_image);
 		break;
 #endif
 #if CONFIG_IS_ENABLED(OPTEE)
 	case IH_OS_OP_TEE:
-		debug("Jumping to U-Boot via OP-TEE\n");
-		spl_optee_entry(NULL, NULL, (void *)spl_image.fdt_addr,
+		printf("Jumping to %s(0x%08lx) via OP-TEE(0x%08lx)\n",
+		       spl_image.next_stage == SPL_NEXT_STAGE_UBOOT ? "U-Boot" :
+		       (spl_image.next_stage == SPL_NEXT_STAGE_KERNEL ? "Kernel" : "Unknown"),
+		       (ulong)spl_image.entry_point_os,
+		       (ulong)spl_image.entry_point);
+		spl_cleanup_before_jump(&spl_image);
+		spl_optee_entry(NULL, (void *)spl_image.entry_point_os,
+				(void *)spl_image.fdt_addr,
 				(void *)spl_image.entry_point);
 		break;
 #endif
@@ -602,4 +680,33 @@ ulong spl_relocate_stack_gd(void)
 #else
 	return 0;
 #endif
+}
+
+/* cleanup before jump to next stage */
+void spl_cleanup_before_jump(struct spl_image_info *spl_image)
+{
+	ulong us;
+
+	spl_board_prepare_for_jump(spl_image);
+
+	disable_interrupts();
+
+	/*
+	 * Turn off I-cache and invalidate it
+	 */
+	icache_disable();
+	invalidate_icache_all();
+
+	/*
+	 * Turn off D-cache
+	 * dcache_disable() in turn flushes the d-cache and disables MMU
+	 */
+	dcache_disable();
+	invalidate_dcache_all();
+
+	dsb();
+	isb();
+
+	us = (get_ticks() - gd->sys_start_tick) / 24UL;
+	printf("Total: %ld.%ld ms\n\n", us / 1000, us % 1000);
 }

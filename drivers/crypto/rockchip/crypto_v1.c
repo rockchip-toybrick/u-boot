@@ -7,16 +7,26 @@
 #include <clk.h>
 #include <crypto.h>
 #include <dm.h>
+#include <rockchip/crypto_hash_cache.h>
 #include <rockchip/crypto_v1.h>
 #include <asm/io.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/clock.h>
 
 #define CRYPTO_V1_DEFAULT_RATE		100000000
+/* crypto timeout 500ms, must support more than 32M data per times*/
+#define HASH_UPDATE_LIMIT	(32 * 1024 * 1024)
+#define RK_CRYPTO_TIME_OUT	500000
+
+#define LLI_ADDR_ALIGIN_SIZE	8
+#define DATA_ADDR_ALIGIN_SIZE	8
+#define DATA_LEN_ALIGIN_SIZE	64
 
 struct rockchip_crypto_priv {
+	struct crypto_hash_cache	*hash_cache;
 	struct rk_crypto_reg *reg;
 	struct clk clk;
+	sha_context *ctx;
 	u32 frequency;
 	char *clocks;
 	u32 nclocks;
@@ -33,6 +43,36 @@ static u32 rockchip_crypto_capability(struct udevice *dev)
 	       CRYPTO_RSA2048;
 }
 
+static int rk_hash_direct_calc(void *hw_data, const u8 *data,
+			       u32 data_len, u8 *started_flag, u8 is_last)
+{
+	struct rockchip_crypto_priv *priv = hw_data;
+	struct rk_crypto_reg *reg = priv->reg;
+
+	if (!data_len)
+		return -EINVAL;
+
+	/* Must flush dcache before crypto DMA fetch data region */
+	crypto_flush_cacheline((ulong)data, data_len);
+
+	/* Hash Done Interrupt */
+	writel(HASH_DONE_INT, &reg->crypto_intsts);
+
+	/* Set data base and length */
+	writel((u32)(ulong)data, &reg->crypto_hrdmas);
+	writel((data_len + 3) >> 2, &reg->crypto_hrdmal);
+
+	/* Write 1 to start. When finishes, the core will clear it */
+	rk_setreg(&reg->crypto_ctrl, HASH_START);
+
+	/* Wait last complete */
+	do {} while (readl(&reg->crypto_ctrl) & HASH_START);
+
+	priv->length += data_len;
+
+	return 0;
+}
+
 static int rockchip_crypto_sha_init(struct udevice *dev, sha_context *ctx)
 {
 	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
@@ -43,11 +83,18 @@ static int rockchip_crypto_sha_init(struct udevice *dev, sha_context *ctx)
 		return -EINVAL;
 
 	if (!ctx->length) {
-		printf("%s: Err: crypto v1 request total data "
-		       "length when sha init\n", __func__);
+		printf("Crypto-v1: require data total length for sha init\n");
 		return -EINVAL;
 	}
 
+	priv->hash_cache = crypto_hash_cache_alloc(rk_hash_direct_calc,
+						   priv, ctx->length,
+						   DATA_ADDR_ALIGIN_SIZE,
+						   DATA_LEN_ALIGIN_SIZE);
+	if (!priv->hash_cache)
+		return -EFAULT;
+
+	priv->ctx = ctx;
 	priv->length = 0;
 	writel(ctx->length, &reg->crypto_hash_msg_len);
 	if (ctx->algo == CRYPTO_SHA256) {
@@ -96,30 +143,32 @@ static int rockchip_crypto_sha_update(struct udevice *dev,
 				      u32 *input, u32 len)
 {
 	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
-	struct rk_crypto_reg *reg = priv->reg;
+	int ret = -EINVAL, i;
+	u8 *p;
 
-	if (!len)
-		return -EINVAL;
+	if (!input || !len)
+		goto exit;
 
-	priv->length += len;
+	p = (u8 *)input;
 
-	/* Must flush dcache before crypto DMA fetch data region */
-	flush_cache((unsigned long)input, len);
+	for (i = 0; i < len / HASH_UPDATE_LIMIT; i++, p += HASH_UPDATE_LIMIT) {
+		ret = crypto_hash_update_with_cache(priv->hash_cache, p,
+						    HASH_UPDATE_LIMIT);
+		if (ret)
+			goto exit;
+	}
 
-	/* Wait last complete */
-	do {} while (readl(&reg->crypto_ctrl) & HASH_START);
+	if (len % HASH_UPDATE_LIMIT)
+		ret = crypto_hash_update_with_cache(priv->hash_cache, p,
+						    len % HASH_UPDATE_LIMIT);
 
-	/* Hash Done Interrupt */
-	writel(HASH_DONE_INT, &reg->crypto_intsts);
+exit:
+	if (ret) {
+		crypto_hash_cache_free(priv->hash_cache);
+		priv->hash_cache = NULL;
+	}
 
-	/* Set data base and length */
-	writel((u32)(ulong)input, &reg->crypto_hrdmas);
-	writel((len + 3) >> 2, &reg->crypto_hrdmal);
-
-	/* Write 1 to start. When finishes, the core will clear it */
-	rk_setreg(&reg->crypto_ctrl, HASH_START);
-
-	return 0;
+	return ret;
 }
 
 static int rockchip_crypto_sha_final(struct udevice *dev,
@@ -128,14 +177,15 @@ static int rockchip_crypto_sha_final(struct udevice *dev,
 	struct rockchip_crypto_priv *priv = dev_get_priv(dev);
 	struct rk_crypto_reg *reg = priv->reg;
 	u32 *buf = (u32 *)output;
+	int ret = 0;
 	u32 nbits;
 	int i;
 
 	if (priv->length != ctx->length) {
-		printf("%s: Err: update total length(0x%x) is not equal "
-		       "to init total length(0x%x)!\n",
-		       __func__, priv->length, ctx->length);
-		return -EIO;
+		printf("total length(0x%08x) != init length(0x%08x)!\n",
+		       priv->length, ctx->length);
+		ret = -EIO;
+		goto exit;
 	}
 
 	/* Wait last complete */
@@ -149,9 +199,13 @@ static int rockchip_crypto_sha_final(struct udevice *dev,
 	for (i = 0; i < BITS2WORD(nbits); i++)
 		buf[i] = readl(&reg->crypto_hash_dout[i]);
 
-	return 0;
+exit:
+	crypto_hash_cache_free(priv->hash_cache);
+	priv->hash_cache = NULL;
+	return ret;
 }
 
+#if CONFIG_IS_ENABLED(ROCKCHIP_RSA)
 static int rockchip_crypto_rsa_verify(struct udevice *dev, rsa_key *ctx,
 				      u8 *sign, u8 *output)
 {
@@ -203,7 +257,13 @@ static int rockchip_crypto_rsa_verify(struct udevice *dev, rsa_key *ctx,
 
 	return 0;
 }
-
+#else
+static int rockchip_crypto_rsa_verify(struct udevice *dev, rsa_key *ctx,
+				      u8 *sign, u8 *output)
+{
+	return -ENOSYS;
+}
+#endif
 static const struct dm_crypto_ops rockchip_crypto_ops = {
 	.capability = rockchip_crypto_capability,
 	.sha_init   = rockchip_crypto_sha_init,
@@ -225,7 +285,7 @@ static int rockchip_crypto_ofdata_to_platdata(struct udevice *dev)
 	int len;
 
 	if (!dev_read_prop(dev, "clocks", &len)) {
-		printf("Can't find \"clocks\" property\n");
+		printf("Crypto-v1: can't find \"clocks\" property\n");
 		return -EINVAL;
 	}
 
@@ -236,7 +296,7 @@ static int rockchip_crypto_ofdata_to_platdata(struct udevice *dev)
 	priv->nclocks = len / sizeof(u32);
 	if (dev_read_u32_array(dev, "clocks", (u32 *)priv->clocks,
 			       priv->nclocks)) {
-		printf("Can't read \"clocks\" property\n");
+		printf("Crypto-v1: can't read \"clocks\" property\n");
 		return -EINVAL;
 	}
 
@@ -255,7 +315,7 @@ static int rockchip_crypto_probe(struct udevice *dev)
 
 	ret = rockchip_get_clk(&priv->clk.dev);
 	if (ret) {
-		printf("Failed to get clk device, ret=%d\n", ret);
+		printf("Crypto-v1: failed to get clk device, ret=%d\n", ret);
 		return ret;
 	}
 
@@ -264,8 +324,8 @@ static int rockchip_crypto_probe(struct udevice *dev)
 		priv->clk.id = clocks[i];
 		ret = clk_set_rate(&priv->clk, priv->frequency);
 		if (ret < 0) {
-			printf("%s: Failed to set clk(%ld): ret=%d\n",
-			       __func__, priv->clk.id, ret);
+			printf("Crypto-v1: failed to set clk(%ld): ret=%d\n",
+			       priv->clk.id, ret);
 			return ret;
 		}
 	}

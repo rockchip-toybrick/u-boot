@@ -21,6 +21,10 @@
 	u-boot,dm-pre-reloc;
 };
 
+&crypto {
+	u-boot,dm-pre-reloc;
+};
+
 &grf {
 	u-boot,dm-pre-reloc;
 };
@@ -67,10 +71,6 @@
 };
 
 &usb_host0_ehci {
-	u-boot,dm-spl;
-};
-
-&usb_host0_xhci {
 	u-boot,dm-spl;
 };
 

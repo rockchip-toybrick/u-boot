@@ -3,6 +3,8 @@
 
 /* high 24 bits is tag, low 8 bits is type */
 #define REBOOT_FLAG		0x5242C300
+/* cold boot */
+#define BOOT_COLD		0
 /* normal boot */
 #define BOOT_NORMAL		(REBOOT_FLAG + 0)
 /* enter loader rockusb mode */
@@ -24,7 +26,6 @@
 
 #ifndef __ASSEMBLY__
 int setup_boot_mode(void);
-void boot_devtype_init(void);
 #endif
 
 #endif

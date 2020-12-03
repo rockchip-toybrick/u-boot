@@ -12,7 +12,9 @@
 #include <u-boot/sha256.h>
 #include <u-boot/sha512.h>
 
-static u8 foo_data[] = {
+#define HASH_PERF_EVAL(dev, algo)	hash_perf_eval(dev, algo, #algo)
+
+__cacheline_aligned static u8 foo_data[] = {
 	0x52, 0x53, 0x41, 0x4b, 0x00, 0x00, 0x00, 0x00, 0x23, 0x00, 0x00, 0x00,
 	0xda, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd5, 0xf2, 0xfc, 0xbb,
@@ -87,6 +89,8 @@ static u8 foo_data[] = {
 	0xe4, 0x41, 0xe6, 0x6a, 0x46, 0x93, 0x24, 0x89, 0x1b, 0x74, 0x3c, 0xa0,
 	0x20, 0x3b, 0x4e, 0x64, 0xff, 0xff, 0xff, 0xff,
 };
+
+#if CONFIG_IS_ENABLED(ROCKCHIP_RSA)
 
 static u8 rsa2048_n[] = {
 	0xd5, 0xf2, 0xfc, 0xbb, 0x1a, 0x39, 0x61, 0xf5, 0x63, 0x7f, 0xa6, 0xeb,
@@ -191,6 +195,8 @@ static u8 rsa2048_sha256_sign[] = {
 	0x19, 0x9a, 0x1d, 0x32,
 };
 
+#endif
+
 static void dump_hash(const char *title, void *hard_d, void *soft_d, u32 nbits)
 {
 	int i, same;
@@ -225,6 +231,50 @@ static void dump_hex(const char *name, const u8 *array, u32 len)
 	printf("\n");
 }
 
+static int hash_perf_eval(struct udevice *dev, u32 algo, char *algo_name)
+{
+	sha_context ctx;
+	u32 data_size = 8 * 1024;
+	u8 *data = NULL;
+	u8 hash_out[64];
+	int ret;
+
+	ctx.algo = algo;
+	ctx.length = 100 * 1024 * 1024;
+
+	data = (u8 *)memalign(CONFIG_SYS_CACHELINE_SIZE, data_size);
+	if (!data) {
+		printf("%s, %d: memalign %u error!\n",
+		       __func__, __LINE__, data_size);
+		return -EINVAL;
+	}
+
+	memset(data, 0xab, data_size);
+
+	ulong start = get_timer(0);
+
+	ret = crypto_sha_init(dev, &ctx);
+	if (ret)
+		goto exit;
+
+	for (u32 i = 0; i < ctx.length / data_size; i++) {
+		ret = crypto_sha_update(dev, (u32 *)data, data_size);
+		if (ret)
+			goto exit;
+	}
+
+	ret = crypto_sha_final(dev, &ctx, hash_out);
+
+	ulong time_cost = get_timer(start);
+
+	printf("%s, hash performance = %luMBps\n",
+	       algo_name, (100 * 1000) / time_cost);
+exit:
+	free(data);
+
+	return ret;
+}
+
 static int do_crypto(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 {
 	struct udevice *dev;
@@ -232,16 +282,8 @@ static int do_crypto(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	sha1_context sha1_ctx;
 	sha256_context sha256_ctx;
 	sha512_context sha512_ctx;
-	rsa_key rsa_key;
-	u8 sha256_out0[32];
-	u8 sha256_out1[32];
-	u8 sha1_out0[20];
-	u8 sha1_out1[20];
-	u8 rsa_out[256];
-	u8 md5_out0[16];
-	u8 md5_out1[16];
-	u8 sha512_out0[64];
-	u8 sha512_out1[64];
+	u8 hard_out[256];
+	u8 soft_out[64];
 	u32 cap;
 
 	/* CRYPTO_V1 TODO: SHA512 is not available */
@@ -249,8 +291,11 @@ static int do_crypto(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	cap = CRYPTO_MD5 | CRYPTO_SHA1 | CRYPTO_SHA256 |
 	      CRYPTO_RSA2048;
 #else
-	cap = CRYPTO_MD5 | CRYPTO_SHA1 | CRYPTO_SHA256 | CRYPTO_SHA512 |
-	      CRYPTO_RSA2048 | CRYPTO_TRNG;
+	cap = CRYPTO_MD5 | CRYPTO_SHA1 | CRYPTO_SHA256 |
+#if !defined(CONFIG_ROCKCHIP_RK1808)
+	      CRYPTO_SHA512 |
+#endif
+	      CRYPTO_RSA2048;
 #endif
 	dev = crypto_get_device(cap);
 	if (!dev) {
@@ -260,58 +305,69 @@ static int do_crypto(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 
 	/* MD5 */
 	if (cap & CRYPTO_MD5) {
+		HASH_PERF_EVAL(dev, CRYPTO_MD5);
 		csha_ctx.algo = CRYPTO_MD5;
 		csha_ctx.length = sizeof(foo_data);
+		memset(hard_out, 0x00, sizeof(hard_out));
 		crypto_sha_csum(dev, &csha_ctx, (char *)foo_data,
-				sizeof(foo_data), md5_out0);
-		md5(foo_data, sizeof(foo_data), md5_out1);
-		dump_hash("MD5", md5_out0, md5_out1,
+				sizeof(foo_data), hard_out);
+		md5(foo_data, sizeof(foo_data), soft_out);
+		dump_hash("MD5", hard_out, soft_out,
 			  crypto_algo_nbits(csha_ctx.algo));
 	}
 
 	/* SHA1 */
 	if (cap & CRYPTO_SHA1) {
+		HASH_PERF_EVAL(dev, CRYPTO_SHA1);
 		csha_ctx.algo = CRYPTO_SHA1;
 		csha_ctx.length = sizeof(foo_data);
+		memset(hard_out, 0x00, sizeof(hard_out));
 		crypto_sha_csum(dev, &csha_ctx, (char *)foo_data,
-				sizeof(foo_data), sha1_out0);
+				sizeof(foo_data), hard_out);
 		sha1_starts(&sha1_ctx);
 		sha1_update(&sha1_ctx, (const u8 *)foo_data, sizeof(foo_data));
-		sha1_finish(&sha1_ctx, sha1_out1);
-		dump_hash("SHA1", sha1_out0, sha1_out1,
+		sha1_finish(&sha1_ctx, soft_out);
+		dump_hash("SHA1", hard_out, soft_out,
 			  crypto_algo_nbits(csha_ctx.algo));
 	}
 
 	/* SHA512 */
 	if (cap & CRYPTO_SHA512) {
+		HASH_PERF_EVAL(dev, CRYPTO_SHA512);
 		csha_ctx.algo = CRYPTO_SHA512;
 		csha_ctx.length = sizeof(foo_data);
+		memset(hard_out, 0x00, sizeof(hard_out));
 		crypto_sha_csum(dev, &csha_ctx, (char *)foo_data,
-				sizeof(foo_data), sha512_out0);
+				sizeof(foo_data), hard_out);
 		sha512_starts(&sha512_ctx);
 		sha512_update(&sha512_ctx, (const u8 *)foo_data,
 			      sizeof(foo_data));
-		sha512_finish(&sha512_ctx, sha512_out1);
-		dump_hash("SHA512", sha512_out0, sha512_out1,
+		sha512_finish(&sha512_ctx, soft_out);
+		dump_hash("SHA512", hard_out, soft_out,
 			  crypto_algo_nbits(csha_ctx.algo));
 	}
 
 	/* SHA256 */
 	if (cap & CRYPTO_SHA256) {
+		HASH_PERF_EVAL(dev, CRYPTO_SHA256);
 		csha_ctx.algo = CRYPTO_SHA256;
 		csha_ctx.length = sizeof(foo_data);
+		memset(hard_out, 0x00, sizeof(hard_out));
 		crypto_sha_csum(dev, &csha_ctx, (char *)foo_data,
-				sizeof(foo_data), sha256_out0);
+				sizeof(foo_data), hard_out);
 		sha256_starts(&sha256_ctx);
 		sha256_update(&sha256_ctx, (const u8 *)foo_data,
 			      sizeof(foo_data));
-		sha256_finish(&sha256_ctx, sha256_out1);
-		dump_hash("SHA256", sha256_out0, sha256_out1,
+		sha256_finish(&sha256_ctx, soft_out);
+		dump_hash("SHA256", hard_out, soft_out,
 			  crypto_algo_nbits(csha_ctx.algo));
 	}
 
+#if CONFIG_IS_ENABLED(ROCKCHIP_RSA)
 	/* RSA2048-SHA256 */
-	if ((cap & CRYPTO_RSA2048) && (cap & CRYPTO_SHA256)) {
+	if (cap & CRYPTO_RSA2048) {
+		rsa_key rsa_key;
+
 		memset(&rsa_key, 0x00, sizeof(rsa_key));
 		rsa_key.algo = CRYPTO_RSA2048;
 		rsa_key.n = (u32 *)&rsa2048_n;
@@ -319,16 +375,25 @@ static int do_crypto(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 #ifdef CONFIG_ROCKCHIP_CRYPTO_V1
 		rsa_key.c = (u32 *)&rsa2048_c;
 #endif
-		crypto_rsa_verify(dev, &rsa_key, rsa2048_sha256_sign, rsa_out);
-		dump_hash("RSA2048-SHA256", rsa_out,
-			  sha256_out1, crypto_algo_nbits(csha_ctx.algo));
+		memset(hard_out, 0x00, sizeof(hard_out));
+		crypto_rsa_verify(dev, &rsa_key, rsa2048_sha256_sign, hard_out);
+		sha256_starts(&sha256_ctx);
+		sha256_update(&sha256_ctx, (const u8 *)foo_data,
+			      sizeof(foo_data));
+		sha256_finish(&sha256_ctx, soft_out);
+		dump_hash("RSA2048-SHA256", hard_out,
+			  soft_out, crypto_algo_nbits(csha_ctx.algo));
 	}
+#endif
 
-	/* TRNG */
-	if (cap & CRYPTO_TRNG) {
-		memset(rsa_out, 0x00, sizeof(rsa_out));
-		crypto_get_trng(dev, rsa_out, sizeof(rsa_out));
-		dump_hex("TRNG", rsa_out, sizeof(rsa_out));
+	dev = crypto_get_device(CRYPTO_TRNG);
+	if (dev) {
+		memset(hard_out, 0x00, sizeof(hard_out));
+		crypto_get_trng(dev, hard_out, sizeof(hard_out));
+		dump_hex("TRNG", hard_out, sizeof(hard_out));
+
+	} else {
+		printf("Can't find crypto device for CRYPTO_TRNG\n");
 	}
 
 	return 0;

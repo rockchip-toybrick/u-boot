@@ -55,6 +55,7 @@ enum uclass_id {
 	UCLASS_MMC,		/* SD / MMC card or chip */
 	UCLASS_MOD_EXP,		/* RSA Mod Exp device */
 	UCLASS_MTD,		/* Memory Technology Device (MTD) device */
+	UCLASS_NOP,		/* No-op devices */
 	UCLASS_NORTHBRIDGE,	/* Intel Northbridge / SDRAM controller */
 	UCLASS_NVME,		/* NVM Express device */
 	UCLASS_PANEL,		/* Display panel, such as an LCD */
@@ -90,11 +91,13 @@ enum uclass_id {
 	UCLASS_USB,		/* USB bus */
 	UCLASS_USB_DEV_GENERIC,	/* USB generic device */
 	UCLASS_USB_HUB,		/* USB hub */
+	UCLASS_USB_GADGET_GENERIC,	/* USB generic device */
 	UCLASS_VIDEO,		/* Video or LCD device */
 	UCLASS_VIDEO_BRIDGE,	/* Video bridge, e.g. DisplayPort to LVDS */
 	UCLASS_VIDEO_CONSOLE,	/* Text console driver for video device */
 	UCLASS_VIDEO_CRTC,	/* Display Controller */
 	UCLASS_WDT,		/* Watchdot Timer driver */
+
 	UCLASS_FG,		/* Fuel gauge */
 	UCLASS_KEY,		/* Key */
 	UCLASS_RC,		/* Remote Controller */
@@ -102,6 +105,8 @@ enum uclass_id {
 	UCLASS_DVFS,		/* DVFS policy */
 	UCLASS_IO_DOMAIN,	/* IO domain */
 	UCLASS_CRYPTO,		/* Crypto */
+	UCLASS_ETH_PHY,		/* Ethernet PHY device */
+	UCLASS_MDIO,		/* MDIO bus */
 	UCLASS_COUNT,
 	UCLASS_INVALID = -1,
 };

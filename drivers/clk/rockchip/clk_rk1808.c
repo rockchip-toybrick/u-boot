@@ -265,6 +265,58 @@ static ulong rk1808_mmc_set_clk(struct rk1808_clk_priv *priv,
 	return rk1808_mmc_get_clk(priv, clk_id);
 }
 
+static ulong rk1808_sfc_get_clk(struct rk1808_clk_priv *priv, uint clk_id)
+{
+	struct rk1808_cru *cru = priv->cru;
+	u32 div, con;
+
+	con = readl(&cru->clksel_con[26]);
+	div = (con & SFC_DIV_CON_MASK) >> SFC_DIV_CON_SHIFT;
+
+	return DIV_TO_RATE(priv->gpll_hz, div);
+}
+
+static ulong rk1808_sfc_set_clk(struct rk1808_clk_priv *priv,
+				ulong clk_id, ulong set_rate)
+{
+	struct rk1808_cru *cru = priv->cru;
+	int src_clk_div;
+
+	src_clk_div = DIV_ROUND_UP(priv->gpll_hz, set_rate);
+	rk_clrsetreg(&cru->clksel_con[26],
+		     SFC_PLL_SEL_MASK | SFC_DIV_CON_MASK,
+		     0 << SFC_PLL_SEL_SHIFT |
+		     (src_clk_div - 1) << SFC_DIV_CON_SHIFT);
+
+	return rk1808_sfc_get_clk(priv, clk_id);
+}
+
+static ulong rk1808_saradc_get_clk(struct rk1808_clk_priv *priv)
+{
+	struct rk1808_cru *cru = priv->cru;
+	u32 div, con;
+
+	con = readl(&cru->clksel_con[63]);
+	div = con & CLK_SARADC_DIV_CON_MASK;
+
+	return DIV_TO_RATE(OSC_HZ, div);
+}
+
+static ulong rk1808_saradc_set_clk(struct rk1808_clk_priv *priv, uint hz)
+{
+	struct rk1808_cru *cru = priv->cru;
+	int src_clk_div;
+
+	src_clk_div = DIV_ROUND_UP(OSC_HZ, hz);
+	assert(src_clk_div - 1 < 2047);
+
+	rk_clrsetreg(&cru->clksel_con[63],
+		     CLK_SARADC_DIV_CON_MASK,
+		     (src_clk_div - 1) << CLK_SARADC_DIV_CON_SHIFT);
+
+	return rk1808_saradc_get_clk(priv);
+}
+
 #ifndef CONFIG_SPL_BUILD
 static ulong rk1808_pwm_get_clk(struct rk1808_clk_priv *priv, ulong clk_id)
 {
@@ -326,32 +378,6 @@ static ulong rk1808_pwm_set_clk(struct rk1808_clk_priv *priv,
 	}
 
 	return rk1808_pwm_get_clk(priv, clk_id);
-}
-
-static ulong rk1808_saradc_get_clk(struct rk1808_clk_priv *priv)
-{
-	struct rk1808_cru *cru = priv->cru;
-	u32 div, con;
-
-	con = readl(&cru->clksel_con[63]);
-	div = con & CLK_SARADC_DIV_CON_MASK;
-
-	return DIV_TO_RATE(OSC_HZ, div);
-}
-
-static ulong rk1808_saradc_set_clk(struct rk1808_clk_priv *priv, uint hz)
-{
-	struct rk1808_cru *cru = priv->cru;
-	int src_clk_div;
-
-	src_clk_div = DIV_ROUND_UP(OSC_HZ, hz);
-	assert(src_clk_div - 1 < 2047);
-
-	rk_clrsetreg(&cru->clksel_con[63],
-		     CLK_SARADC_DIV_CON_MASK,
-		     (src_clk_div - 1) << CLK_SARADC_DIV_CON_SHIFT);
-
-	return rk1808_saradc_get_clk(priv);
 }
 
 static ulong rk1808_tsadc_get_clk(struct rk1808_clk_priv *priv)
@@ -906,6 +932,12 @@ static ulong rk1808_clk_get_rate(struct clk *clk)
 	case SCLK_SDIO:
 		rate = rk1808_mmc_get_clk(priv, clk->id);
 		break;
+	case SCLK_SFC:
+		rate = rk1808_sfc_get_clk(priv, clk->id);
+		break;
+	case SCLK_SARADC:
+		rate = rk1808_saradc_get_clk(priv);
+		break;
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_PMU_I2C0:
 	case SCLK_I2C1:
@@ -919,9 +951,6 @@ static ulong rk1808_clk_get_rate(struct clk *clk)
 	case SCLK_PWM1:
 	case SCLK_PWM2:
 		rate = rk1808_pwm_get_clk(priv, clk->id);
-		break;
-	case SCLK_SARADC:
-		rate = rk1808_saradc_get_clk(priv);
 		break;
 	case SCLK_TSADC:
 		rate = rk1808_tsadc_get_clk(priv);
@@ -1007,6 +1036,12 @@ static ulong rk1808_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_SDIO:
 		ret = rk1808_mmc_set_clk(priv, clk->id, rate);
 		break;
+	case SCLK_SFC:
+		ret = rk1808_sfc_set_clk(priv, clk->id, rate);
+		break;
+	case SCLK_SARADC:
+		ret = rk1808_saradc_set_clk(priv, rate);
+		break;
 #ifndef CONFIG_SPL_BUILD
 	case SCLK_PMU_I2C0:
 	case SCLK_I2C1:
@@ -1020,9 +1055,6 @@ static ulong rk1808_clk_set_rate(struct clk *clk, ulong rate)
 	case SCLK_PWM1:
 	case SCLK_PWM2:
 		ret = rk1808_pwm_set_clk(priv, clk->id, rate);
-		break;
-	case SCLK_SARADC:
-		ret = rk1808_saradc_set_clk(priv, rate);
 		break;
 	case SCLK_TSADC:
 		ret = rk1808_tsadc_set_clk(priv, rate);
@@ -1243,6 +1275,10 @@ static int rk1808_clk_probe(struct udevice *dev)
 {
 	struct rk1808_clk_priv *priv = dev_get_priv(dev);
 	int ret;
+#ifndef CONFIG_SPL_BUILD
+	ulong crypto_rate, crypto_apk_rate;
+	ulong emmc_rate, sdmmc_rate, sfc_rate;
+#endif
 
 	priv->sync_kernel = false;
 	if (!priv->armclk_enter_hz) {
@@ -1258,7 +1294,17 @@ static int rk1808_clk_probe(struct udevice *dev)
 			printf("%s failed to set armclk rate\n", __func__);
 		priv->armclk_init_hz = APLL_HZ;
 	}
-
+#ifdef CONFIG_SPL_BUILD
+	/*
+	 * The eMMC clk is depended on gpll, and the eMMC is needed to
+	 * run 150MHz in HS200 mode. So set gpll to GPLL_HZ(594000000)
+	 * which can be divided near to 150MHz.
+	 */
+	ret = rockchip_pll_set_rate(&rk1808_pll_clks[GPLL],
+				    priv->cru, GPLL, GPLL_HZ);
+	if (ret < 0)
+		printf("%s failed to set gpll rate\n", __func__);
+#endif
 	priv->cpll_hz = rockchip_pll_get_rate(&rk1808_pll_clks[CPLL],
 					      priv->cru, CPLL);
 	priv->gpll_hz = rockchip_pll_get_rate(&rk1808_pll_clks[GPLL],
@@ -1266,12 +1312,28 @@ static int rk1808_clk_probe(struct udevice *dev)
 	priv->npll_hz = rockchip_pll_get_rate(&rk1808_pll_clks[NPLL],
 					      priv->cru, NPLL);
 
+#ifndef CONFIG_SPL_BUILD
+	crypto_rate = rk1808_crypto_get_clk(priv, SCLK_CRYPTO);
+	crypto_apk_rate = rk1808_crypto_get_clk(priv, SCLK_CRYPTO_APK);
+	emmc_rate = rk1808_mmc_get_clk(priv, SCLK_EMMC);
+	sdmmc_rate = rk1808_mmc_get_clk(priv, SCLK_SDMMC);
+	sfc_rate = rk1808_sfc_get_clk(priv, SCLK_SFC);
+#endif
+
 	/* Process 'assigned-{clocks/clock-parents/clock-rates}' properties */
 	ret = clk_set_defaults(dev);
 	if (ret)
 		debug("%s clk_set_defaults failed %d\n", __func__, ret);
 	else
 		priv->sync_kernel = true;
+
+#ifndef CONFIG_SPL_BUILD
+	rk1808_crypto_set_clk(priv, SCLK_CRYPTO, crypto_rate);
+	rk1808_crypto_set_clk(priv, SCLK_CRYPTO_APK, crypto_apk_rate);
+	rk1808_mmc_set_clk(priv, SCLK_EMMC, emmc_rate);
+	rk1808_mmc_set_clk(priv, SCLK_SDMMC, sdmmc_rate);
+	rk1808_sfc_set_clk(priv, SCLK_SFC, sfc_rate);
+#endif
 
 	return 0;
 }

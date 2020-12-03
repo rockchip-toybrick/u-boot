@@ -70,19 +70,22 @@ static int spl_nand_load_element(struct spl_image_info *spl_image,
 	load.bl_len = 1;
 	load.read = spl_nand_rkfw_read;
 
-	ret = spl_load_rkfw_image(spl_image, &load,
-				  CONFIG_RKFW_TRUST_SECTOR,
-				  CONFIG_RKFW_U_BOOT_SECTOR);
+	ret = spl_load_rkfw_image(spl_image, &load);
 	if (!ret || ret != -EAGAIN)
 		return ret;
 #endif
-
 	err = nand_spl_load_image(offset, sizeof(*header), (void *)header);
 	if (err)
 		return err;
 
+#ifdef CONFIG_SPL_FIT_IMAGE_MULTIPLE
+	if ((IS_ENABLED(CONFIG_SPL_LOAD_FIT) &&
+	     image_get_magic(header) == FDT_MAGIC) ||
+	     CONFIG_SPL_FIT_IMAGE_MULTIPLE > 1) {
+#else
 	if (IS_ENABLED(CONFIG_SPL_LOAD_FIT) &&
 	    image_get_magic(header) == FDT_MAGIC) {
+#endif
 		struct spl_load_info load;
 
 		debug("Found FIT\n");

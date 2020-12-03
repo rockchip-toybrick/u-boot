@@ -54,10 +54,18 @@ static const image_header_t *image_get_fdt(ulong fdt_addr)
 	}
 	puts("OK\n");
 
+	/*
+	 * default image mkimage conflicts with fit mkimage on param: -T "flat_dt".
+	 *
+	 * error message:
+	 * "./tools/mkimage: Can't set header for FIT Image support: Success"
+	 */
+#if 0
 	if (!image_check_type(fdt_hdr, IH_TYPE_FLATDT)) {
 		fdt_error("uImage is not a fdt");
 		return NULL;
 	}
+#endif
 	if (image_get_comp(fdt_hdr) != IH_COMP_NONE) {
 		fdt_error("uImage is compressed");
 		return NULL;
@@ -174,7 +182,11 @@ int boot_fdt_add_sysmem_rsv_regions(void *fdt_blob)
 		rsv_addr = fdtdec_get_addr_size_auto_noparent(fdt_blob, offset,
 							      "reg", 0,
 							      &rsv_size, false);
-		if (rsv_addr == FDT_ADDR_T_NONE || !rsv_size)
+		/*
+		 * kernel will alloc reserved memory dynamically for the node
+		 * with start address from 0.
+		 */
+		if (rsv_addr == FDT_ADDR_T_NONE || !rsv_addr || !rsv_size)
 			continue;
 		debug("  sysmem: 'reserved-memory' %s: addr=%llx size=%llx\n",
 		      fdt_get_name(fdt_blob, offset, NULL),
@@ -238,6 +250,10 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 			lmb_reserve(lmb, (ulong)of_start, of_len);
 			disable_relocation = 1;
 		} else if (desired_addr) {
+
+			if (desired_addr && env_get_yesno("bootm-reloc-at"))
+				desired_addr += of_len;
+
 			of_start =
 			    (void *)(ulong) lmb_alloc_base(lmb, of_len, 0x1000,
 							   (ulong)desired_addr);

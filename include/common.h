@@ -37,6 +37,7 @@ typedef volatile unsigned char	vu_char;
 #include <part.h>
 #include <flash.h>
 #include <image.h>
+#include <stacktrace.h>
 
 /* Bring in printf format macros if inttypes.h is included */
 #define __STDC_FORMAT_MACROS
@@ -102,6 +103,7 @@ int	cpu_init(void);
 
 /* common/main.c */
 void	main_loop	(void);
+void autoboot_command_fail_handle(void);
 int run_command(const char *cmd, int flag);
 int run_command_repeatable(const char *cmd, int flag);
 
@@ -147,7 +149,7 @@ void board_init_f_init_reserve(ulong base);
 /*
  * Board-specific Platform code can init serial earlier if needed
  */
-__weak int board_init_f_init_serial(void);
+__weak int board_init_f_boot_flags(void);
 
 /**
  * arch_setup_gd() - Set up the global_data pointer
@@ -520,6 +522,8 @@ int	is_core_valid (unsigned int);
  * version (which does nothing) will be used.
  */
 int arch_cpu_init(void);
+
+int arch_fpga_init(void);
 
 void s_init(void);
 
