@@ -13,7 +13,7 @@
 #include <linux/mtd/mtd.h>
 
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
-#include <asm/arch/vendor.h>
+#include <asm/arch/toybrick.h>
 #endif
 
 #include <rockusb.h>
@@ -22,9 +22,6 @@
 #define ROCKUSB_INTERFACE_SUB_CLASS	0x06
 #define ROCKUSB_INTERFACE_PROTOCOL	0x05
 
-#define TOYBRICK_SN_ID		0x01
-#define TOYBRICK_MAC_ID	0x03
-#define TOYBRICK_ACT_ID	0xa0
 #define ROCKCHIP_FLASH_BLOCK_SIZE	1024
 #define ROCKCHIP_FLASH_PAGE_SIZE	4
 
@@ -461,32 +458,25 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 					return -EIO;
 				}
 
-				if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+64+6)) != 0) {//Seed
+				if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN)) != 0) {//Seed
 					printf("trusty_write_toybrick_seed error!");
 					curlun->sense_data = SS_WRITE_ERROR;
 					return -EIO;
 				}
 
-				rc = vendor_storage_write(TOYBRICK_SN_ID,//SN
-							  (char __user *)data+8,
-							  64);
+				rc = toybrick_set_sn((char __user *)data+8);
 				if (rc < 0) {
 					curlun->sense_data = SS_WRITE_ERROR;
 					return -EIO;
 				}
 
-				rc = vendor_storage_write(TOYBRICK_MAC_ID,//LAN MAC
-							  (char __user *)data+8+64,
-							  6);
+				rc = toybrick_set_mac((char __user *)data+8+TOYBRICK_SN_LEN);
 				if (rc < 0) {
 					curlun->sense_data = SS_WRITE_ERROR;
 					return -EIO;
 				}
 
-
-				rc = vendor_storage_write(TOYBRICK_ACT_ID,//Activation Code
-							  (char __user *)data+8+64+6+12+16,
-							  8+256);
+				rc = toybrick_set_actcode((char __user *)data+8+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN+12+16);
 				if (rc < 0) {
 					curlun->sense_data = SS_WRITE_ERROR;
 					return -EIO;
@@ -569,17 +559,13 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 			vhead->size = rc;
 		} else if (type == 2) {
 
-			rc = vendor_storage_read(TOYBRICK_SN_ID,//SN
-						 (char __user *)data,
-						 64);
+			rc = toybrick_get_sn((char __user *)data);
 			if (!rc) {
 				curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
 				return -EIO;
 			}
 
-			rc = vendor_storage_read(TOYBRICK_MAC_ID,//LAN MAC
-						 (char __user *)data+64,
-						 6);
+			rc = toybrick_get_mac((char __user *)data+TOYBRICK_SN_LEN);
 			if (!rc) {
 				curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
 				return -EIO;
@@ -594,9 +580,7 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 				return -EIO;
 			}
 
-			rc = vendor_storage_read(TOYBRICK_ACT_ID,//Activation Code
-						 (char __user *)data+64+6+12+16,
-						 8+256);
+			rc = toybrick_get_actcode((char __user *)data+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN+12+16);
 			if (!rc) {
 				curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
 				return -EIO;

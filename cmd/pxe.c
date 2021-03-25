@@ -15,6 +15,7 @@
 #include <linux/list.h>
 #include <fs.h>
 #include <asm/io.h>
+#include <asm/arch/toybrick.h>
 
 #include "menu.h"
 #include "cli.h"
@@ -1649,6 +1650,9 @@ static int do_sysboot(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	struct pxe_menu *cfg;
 	char *pxefile_addr_str;
 	char *filename;
+	char tflag[TOYBRICK_FLAG_LEN + 1];
+	int index = -1;
+	char toybrick_conf[128];
 	int prompt = 0;
 
 	is_pxe = false;
@@ -1695,7 +1699,16 @@ static int do_sysboot(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 		return 1;
 	}
 
-	if (get_pxe_file(cmdtp, filename, pxefile_addr_r) < 0) {
+	if (strstr(filename, "extlinux.conf") != NULL && toybrick_get_flag(tflag, &index)== 0) {
+		if (index == -1)
+			sprintf(toybrick_conf, "%s.%s", filename, tflag);
+		else
+			sprintf(toybrick_conf, "%s.%s.%d", filename, tflag, index);
+	} else {
+		strcpy(toybrick_conf, filename);
+	}
+
+	if (get_pxe_file(cmdtp, toybrick_conf, pxefile_addr_r) < 0) {
 		printf("Error reading config file\n");
 		return 1;
 	}

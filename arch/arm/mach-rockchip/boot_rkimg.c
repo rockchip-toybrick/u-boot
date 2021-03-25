@@ -28,6 +28,7 @@
 #include <asm/arch/param.h>
 #include <asm/arch/resource_img.h>
 #include <asm/arch/uimage.h>
+#include <asm/arch/toybrick.h>
 #include <dm/ofnode.h>
 #include <linux/list.h>
 #include <u-boot/sha1.h>
@@ -449,6 +450,9 @@ static int rockchip_read_distro_dtb(void *fdt_addr)
 	char devnum_part[12];
 	char fdt_hex_str[19];
 	char *fs_argv[5];
+	char flag[TOYBRICK_FLAG_LEN + 1];
+	char dtb_path[128];
+	int index = -1;
 	//int size;
 	//int ret;
 
@@ -473,7 +477,12 @@ static int rockchip_read_distro_dtb(void *fdt_addr)
 	fs_argv[1] = devtype,
 	fs_argv[2] = devnum_part;
 	fs_argv[3] = fdt_hex_str;
-	fs_argv[4] = CONFIG_ROCKCHIP_EARLY_DISTRO_DTB_PATH;
+
+	if(toybrick_get_flag(flag, &index) < 0)
+		strcpy(dtb_path, CONFIG_ROCKCHIP_EARLY_DISTRO_DTB_PATH);
+	else
+		sprintf(dtb_path, "%s.%s", CONFIG_ROCKCHIP_EARLY_DISTRO_DTB_PATH, flag);
+	fs_argv[4] = dtb_path;
 
 	if (do_load(NULL, 0, 5, fs_argv, FS_TYPE_ANY))
 		return -EIO;
@@ -481,7 +490,7 @@ static int rockchip_read_distro_dtb(void *fdt_addr)
 	if (fdt_check_header(fdt_addr))
 		return -EBADF;
 
-	printf("DTB(Distro): %s\n", CONFIG_ROCKCHIP_EARLY_DISTRO_DTB_PATH);
+	printf("DTB(Distro): %s\n", dtb_path);
 
 	return 0;
 }

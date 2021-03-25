@@ -10,15 +10,9 @@
 #include <asm/io.h>
 #include <asm/arch/boot_mode.h>
 
-#include <asm/arch/vendor.h>
+#include <asm/arch/toybrick.h>
 #include <optee_include/OpteeClientInterface.h>
 #include <u-boot/sha256.h>
-#define TOYBRICK_SN_LEN 64
-#define TOYBRICK_MAC_LEN 6
-#define TOYBRICK_AC_LEN 264
-#define TOYBRICK_SN_ID         0x01
-#define TOYBRICK_MAC_ID        0x03
-#define TOYBRICK_ACT_ID        0xa0
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -204,113 +198,181 @@ int rockchip_get_boot_mode(void)
 		return boot_mode[PL];
 }
 
-int toybrick_SnMacAc_check(void) {
+static int load_SnMacAc_from_vendor(char *sn, char *mac, char *actcode)
+{
+	int ret;
 
-	char vendor_sn[TOYBRICK_SN_LEN + 1]={0};
-	char vendor_mac[TOYBRICK_MAC_LEN + 1]={0};
-	char vendor_ac[TOYBRICK_AC_LEN + 1]={0};
-	uint8_t sn_mac_ac[TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1]={0};
-	uint8_t sn_mac_ac_sha256[TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1]={0};
-	uint8_t digest[SHA256_SUM_LEN+1] = {0};
-	uint8_t hash_pre[SHA256_SUM_LEN+1] = {0};
-	int ret_mac=-1,ret_sn=-1,ret_ac=-1,ret_sn_mac_ac=-1,ret=0;
+	memset(sn, 0, TOYBRICK_SN_LEN + 1);
+	memset(mac, 0, TOYBRICK_MAC_LEN + 1);
+	memset(actcode, 0, TOYBRICK_ACTCODE_LEN + 1);
+
+	ret = toybrick_get_sn(sn);
+	if (ret <= 0) {
+		printf("Load sn form vendor failed\n");
+		return -EIO;
+	}
+
+	ret = toybrick_get_mac(mac);
+	if (ret != TOYBRICK_MAC_LEN) {
+		printf("Load mac form vendor failed\n");
+		return -EIO;
+	}
+
+	ret = toybrick_get_actcode(actcode);
+	if (ret != TOYBRICK_ACTCODE_LEN) {
+		printf("Load actcode form vendor failed\n");
+		return -EIO;
+	}
+
+	printf("Load SnMacAc from vendor: sn %s, mac %2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
+			sn, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+	return 0;
+}
+
+static int save_SnMacAc_to_vendor(char *sn, char *mac, char *actcode)
+{
+	int ret;
+
+	ret = toybrick_set_sn(sn);
+	if (ret <= 0) {
+		printf("Save sn to vendor failed\n");
+		return -EIO;
+	}
+
+	ret = toybrick_set_mac(mac);
+	if (ret != TOYBRICK_MAC_LEN) {
+		printf("Save mac to vendor failed\n");
+		return -EIO;
+	}
+
+	ret = toybrick_set_actcode(actcode);
+	if (ret != TOYBRICK_ACTCODE_LEN) {
+		printf("Save actcode to vendor failed\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static int load_SnMacAc_from_rpmb(char *sn, char *mac, char *actcode)
+{
+	int ret;
 	sha256_context ctx;
-	ret_sn = vendor_storage_read(TOYBRICK_SN_ID,(void *)vendor_sn,TOYBRICK_SN_LEN);
-	if (ret_sn <= 0) {
-		printf("%s read sn id fail\n",__FUNCTION__);
+	uint8_t digest[SHA256_SUM_LEN + 1] = {0};
+	uint8_t hash_pre[SHA256_SUM_LEN + 1] = {0};
+	uint8_t data_sha256[TOYBRICK_SHA_LEN + 1]={0};
+
+	memset(sn, 0, TOYBRICK_SN_LEN + 1);
+	memset(mac, 0, TOYBRICK_MAC_LEN + 1);
+	memset(actcode, 0, TOYBRICK_ACTCODE_LEN + 1);
+	ret = trusty_read_toybrick_SnMacAc(data_sha256, TOYBRICK_SHA_LEN);
+	if (ret != 0) {
+		printf("Load SnMacAc from rpmb failed\n");
+		return -EIO;
+	}
+	memcpy(hash_pre, data_sha256, SHA256_SUM_LEN);
+	sha256_starts(&ctx);
+	sha256_update(&ctx,(const uint8_t *)(data_sha256 + SHA256_SUM_LEN), TOYBRICK_DATA_LEN);
+	sha256_finish(&ctx, digest);
+	if (memcmp(digest, hash_pre, SHA256_SUM_LEN) != 0) {
+		printf("SnMacAc from rpmb is invalid\n");
+		return -EINVAL;
+	}
+	memcpy(sn, data_sha256 + SHA256_SUM_LEN, TOYBRICK_SN_LEN);
+	memcpy(mac, data_sha256 + SHA256_SUM_LEN + TOYBRICK_SN_LEN, TOYBRICK_MAC_LEN);
+	memcpy(actcode, data_sha256 + SHA256_SUM_LEN + TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN, TOYBRICK_ACTCODE_LEN);
+
+	if (strlen(sn) == 0) {
+		printf("SnMacAc from rpmb is empty\n");
+		return -EINVAL;
 	}
 
-	ret_mac = vendor_storage_read(TOYBRICK_MAC_ID,//MAC
-								(void *)vendor_mac,
-								TOYBRICK_MAC_LEN);
-	if (ret_mac !=TOYBRICK_MAC_LEN) {
-		printf("%s read mac id fail\n",__FUNCTION__);
+	printf("Load SnMacAc from rpmb: sn %s, mac %2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
+			sn, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+	return 0;
+}
+
+static int save_SnMacAc_to_rpmb(char *sn, char *mac, char *actcode)
+{
+	int ret;
+	sha256_context ctx;
+	uint8_t digest[SHA256_SUM_LEN + 1] = {0};
+	uint8_t data[TOYBRICK_DATA_LEN + 1]={0};
+	uint8_t data_sha256[TOYBRICK_SHA_LEN + 1]={0};
+
+	memset(&data, 0, sizeof(data));
+	memset(&data_sha256, 0, sizeof(data_sha256));
+	memcpy(data, sn, TOYBRICK_SN_LEN);
+	memcpy(data + TOYBRICK_SN_LEN, mac, TOYBRICK_MAC_LEN);
+	memcpy(data + TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN, actcode, TOYBRICK_ACTCODE_LEN);
+
+	sha256_starts(&ctx);
+	sha256_update(&ctx,(const uint8_t *)data, TOYBRICK_DATA_LEN);
+	sha256_finish(&ctx, digest);
+	memcpy(data_sha256, digest, SHA256_SUM_LEN);
+	memcpy(data_sha256 + SHA256_SUM_LEN, data, TOYBRICK_DATA_LEN);
+	
+	ret = trusty_write_toybrick_SnMacAc(data_sha256, TOYBRICK_SHA_LEN);
+	if (ret != 0) {
+		printf("Save SnMacAc to rpmb failed\n");
+		return -EIO;
 	}
 
-	ret_ac = vendor_storage_read(TOYBRICK_ACT_ID,//AC
-								(void *)vendor_ac,
-								TOYBRICK_AC_LEN);
-	if (ret_ac!=TOYBRICK_AC_LEN) {
-		printf("%s read ac id fail\n",__FUNCTION__);
-	}
+	return 0;
+}
 
-	ret_sn_mac_ac=trusty_read_toybrick_SnMacAc(sn_mac_ac_sha256,
-											 TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN);
-	if (ret_sn_mac_ac!=0) {
-		printf("%s read sn_mac_ac fail\n",__FUNCTION__);
-	}
+static int toybrick_check_SnMacAc(void)
+{
+	int ret = 0;
+	int ret_vendor, ret_rpmb;
+	char vendor_sn[TOYBRICK_SN_LEN + 1];
+	char vendor_mac[TOYBRICK_MAC_LEN + 1];
+	char vendor_actcode[TOYBRICK_ACTCODE_LEN + 1];
+	char rpmb_sn[TOYBRICK_SN_LEN + 1];
+	char rpmb_mac[TOYBRICK_MAC_LEN + 1];
+	char rpmb_actcode[TOYBRICK_ACTCODE_LEN + 1];
 
-	if (ret_sn > 0 && ret_mac==TOYBRICK_MAC_LEN && ret_sn_mac_ac!=0) {
-		printf("Toybrick: backup SN to rpmb partition\n");
-		memset(sn_mac_ac,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+1);
-		memset(sn_mac_ac_sha256,0,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN+1);
-		memcpy(sn_mac_ac,vendor_sn,TOYBRICK_SN_LEN);
-		memcpy(sn_mac_ac+TOYBRICK_SN_LEN,vendor_mac,TOYBRICK_MAC_LEN);
-		memcpy(sn_mac_ac+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN,vendor_ac,TOYBRICK_AC_LEN);
+	ret_vendor = load_SnMacAc_from_vendor(vendor_sn, vendor_mac, vendor_actcode);
+	ret_rpmb = load_SnMacAc_from_rpmb(rpmb_sn, rpmb_mac, rpmb_actcode);
 
-		sha256_starts(&ctx);
-		sha256_update(&ctx,(const uint8_t *)sn_mac_ac,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
-		sha256_finish(&ctx, digest);
-		memcpy(sn_mac_ac_sha256,digest,SHA256_SUM_LEN);
-		memcpy(sn_mac_ac_sha256+SHA256_SUM_LEN,sn_mac_ac,TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
-		ret=trusty_write_toybrick_SnMacAc(sn_mac_ac_sha256,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN+SHA256_SUM_LEN);
-		if (ret!=0) {
-			printf("%s trusty_write_toybrick_SnMacAc wrong!\n",__FUNCTION__);
-			goto error;
-		}
-	} else if ((ret_sn <=0 || ret_mac!=TOYBRICK_MAC_LEN) && ret_sn_mac_ac==0) {
-		printf("Toybrick: load sn from rpm partition to vendor partition\n");
-		memcpy(hash_pre,sn_mac_ac_sha256,SHA256_SUM_LEN);
-		sha256_starts(&ctx);
-		sha256_update(&ctx,(const uint8_t *)sn_mac_ac_sha256+SHA256_SUM_LEN,TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN+TOYBRICK_AC_LEN);
-		sha256_finish(&ctx, digest);
-		if (memcmp(digest, hash_pre, SHA256_SUM_LEN) != 0) {
-			printf("%s get sn_mac_ac wrong!hash error!\n",__FUNCTION__);
-			goto error;
-		}
-
-		memcpy(vendor_sn,sn_mac_ac_sha256+SHA256_SUM_LEN,TOYBRICK_SN_LEN);
-		ret_sn=vendor_storage_write(TOYBRICK_ACT_ID, vendor_sn, TOYBRICK_SN_LEN);
-		if (ret_sn <=0) {
-			printf("%s write sn fail\n",__FUNCTION__);
-			goto error;
-		}
-
-		memcpy(vendor_mac,sn_mac_ac_sha256+SHA256_SUM_LEN+TOYBRICK_SN_LEN,TOYBRICK_MAC_LEN);
-		ret_mac=vendor_storage_write(TOYBRICK_MAC_ID, vendor_mac, TOYBRICK_MAC_LEN);
-		if (ret_mac <0) {
-			printf("%s write mac fail\n",__FUNCTION__);
-			goto error;
-		}
-
-		memcpy(vendor_ac,sn_mac_ac_sha256+SHA256_SUM_LEN+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN,TOYBRICK_AC_LEN);
-		ret_ac=vendor_storage_write(TOYBRICK_ACT_ID, vendor_ac, TOYBRICK_AC_LEN);
-		if (ret_ac <0) {
-			printf("%s write ac fail\n",__FUNCTION__);
-			goto error;
-		}
-	} else  if ((ret_sn <=0 || ret_mac!=TOYBRICK_MAC_LEN ) && ret_sn_mac_ac!=0) {
-		printf("Toybrick: warn: SN is null or it is NOT toybrick board,  goto loader!\n");
+	if (ret_vendor < 0 && ret_rpmb < 0) {
+		printf("No SnMacAc found in vendor and rpmb, goto loader ...\n");
 		run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
 		//set_back_to_bootrom_dnl_flag();
 		do_reset(NULL, 0, 0, NULL);
+	} else if (ret_vendor < 0) {
+		printf("No SnMacAc found in vendor, load from rpmb and save to vendor\n");
+		ret = save_SnMacAc_to_vendor(rpmb_sn, rpmb_mac, rpmb_actcode);
+		do_reset(NULL, 0, 0, NULL);
+	} else if (ret_rpmb < 0) {
+		printf("No SnMacAc found in rpmb, load from vendor and save to rpmb\n");
+		ret = save_SnMacAc_to_rpmb(vendor_sn, vendor_mac, vendor_actcode);
+	} else if (memcmp(vendor_sn, rpmb_sn, TOYBRICK_SN_LEN) != 0){
+		printf("Warn: SN(%s %s) form vendor and rpmb is different!\n",
+				vendor_sn, rpmb_sn);
+		ret = save_SnMacAc_to_vendor(rpmb_sn, rpmb_mac, rpmb_actcode);
+		do_reset(NULL, 0, 0, NULL);
+	} else if (memcmp(vendor_mac, rpmb_mac, TOYBRICK_MAC_LEN) != 0){
+		printf("Warn: MAC form vendor and rpmb is different!\n");
+		ret = save_SnMacAc_to_vendor(rpmb_sn, rpmb_mac, rpmb_actcode);
+		do_reset(NULL, 0, 0, NULL);
+	} else if (memcmp(vendor_actcode, rpmb_actcode, TOYBRICK_ACTCODE_LEN) != 0){
+		printf("Warn: Actcode form vendor and rpmb is different!\n");
+		ret = save_SnMacAc_to_vendor(rpmb_sn, rpmb_mac, rpmb_actcode);
+		do_reset(NULL, 0, 0, NULL);
 	} else {
-		printf("Toybrick: SN(%s) check OK!\n", vendor_sn);
+		printf("Toybrick check SnMacAc OK, sn %s\n", vendor_sn);
+		ret = 0;
 	}
-	return 0;
-error:
-	printf("Toybrick: error: SN is null or it is NOT toybrick board,  goto loader!\n");
-	run_command_list("rockusb 0 ${devtype} ${devnum}", -1, 0);
-	//set_back_to_bootrom_dnl_flag();
-	do_reset(NULL, 0, 0, NULL);
-	return -1;
+
+	return ret;
 }
 
 int setup_boot_mode(void)
 {
 	char env_preboot[256] = {0};
 #ifndef CONFIG_ROCKCHIP_RK3288
-	toybrick_SnMacAc_check();
+	toybrick_check_SnMacAc();
 #endif
 	switch (rockchip_get_boot_mode()) {
 	case BOOT_MODE_BOOTLOADER:
