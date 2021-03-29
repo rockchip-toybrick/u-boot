@@ -38,6 +38,7 @@ uint32_t trusty_write_toybrick_seed(uint32_t *buf);
 uint32_t trusty_read_toybrick_cpu_id(uint8_t *buf);
 uint32_t trusty_read_toybrick_SnMacAc(uint8_t *data, uint32_t size);
 uint32_t trusty_write_toybrick_SnMacAc(uint8_t *data, uint32_t size);
+uint32_t trusty_write_toybrick_extrakey(uint8_t *data, uint32_t size);
 uint32_t trusty_read_permanent_attributes_flag(uint8_t *attributes);
 uint32_t trusty_write_permanent_attributes_flag(uint8_t attributes);
 uint32_t trusty_attest_dh(uint8_t *dh, uint32_t *dh_size);

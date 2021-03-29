@@ -482,6 +482,23 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 					return -EIO;
 				}
 
+			} else if (type == 3) {
+
+				if (memcmp(data, "RKSN", 4) != 0) {
+					printf("tag not equal\n");
+					curlun->sense_data = SS_WRITE_ERROR;
+					return -EIO;
+				}
+				if (vhead->size - 8 != 0x16f) {
+					printf("check extrakey size fail!\n");
+					curlun->sense_data = SS_WRITE_ERROR;
+					return -EIO;
+				}
+				if (trusty_write_toybrick_extrakey((unsigned char *)data+8, 0x16f) != 0) {
+					printf("trusty_write_toybrick_extrakey error!");
+					curlun->sense_data = SS_WRITE_ERROR;
+					return -EIO;
+				}
 			} 
 
 			common->residue -= common->data_size;
