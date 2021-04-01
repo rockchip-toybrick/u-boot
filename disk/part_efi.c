@@ -367,8 +367,8 @@ static void gpt_entry_modify(struct blk_desc *dev_desc,
 
 	if (gpt_pte[i - 1].ending_lba <= (dev_desc->lba - 0x22))
 		return;
-
-	gpt_pte[i - 1].ending_lba = dev_desc->lba - 0x22;
+	/* The last partition size need align to 4KB, here align to 32KB. */
+	gpt_pte[i - 1].ending_lba = dev_desc->lba - 0x40;
 	calc_crc32 = efi_crc32((const unsigned char *)gpt_pte,
 			       le32_to_cpu(gpt_head->num_partition_entries) *
 			       le32_to_cpu(gpt_head->sizeof_partition_entry));
@@ -415,7 +415,7 @@ static int part_efi_repair(struct blk_desc *dev_desc, gpt_entry *gpt_pte,
 		gpt_head->header_crc32 = 0;
 		gpt_head->my_lba = 1;
 		gpt_head->alternate_lba = dev_desc->lba - 1;
-		gpt_head->partition_entry_lba = 0x22;
+		gpt_head->partition_entry_lba = 0x2;
 		gpt_head->last_usable_lba = cpu_to_le64(dev_desc->lba - 34);
 		gpt_entry_modify(dev_desc, gpt_pte, gpt_head);
 		calc_crc32 = efi_crc32((const unsigned char *)gpt_head,

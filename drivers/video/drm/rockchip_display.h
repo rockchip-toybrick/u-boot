@@ -12,8 +12,9 @@
 #include <edid.h>
 #include <dm/ofnode.h>
 
-#define ROCKCHIP_OUTPUT_DSI_DUAL_CHANNEL	BIT(0)
-#define ROCKCHIP_OUTPUT_DSI_DUAL_LINK		BIT(1)
+#define ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE	BIT(0)
+#define ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE	BIT(1)
+#define ROCKCHIP_OUTPUT_DATA_SWAP			BIT(2)
 
 enum data_format {
 	ROCKCHIP_FMT_ARGB8888 = 0,
@@ -53,6 +54,20 @@ enum rockchip_mcu_cmd {
 /* for use special outface */
 #define ROCKCHIP_OUT_MODE_AAAA	15
 
+#define VOP_OUTPUT_IF_RGB	BIT(0)
+#define VOP_OUTPUT_IF_BT1120	BIT(1)
+#define VOP_OUTPUT_IF_BT656	BIT(2)
+#define VOP_OUTPUT_IF_LVDS0	BIT(3)
+#define VOP_OUTPUT_IF_LVDS1	BIT(4)
+#define VOP_OUTPUT_IF_MIPI0	BIT(5)
+#define VOP_OUTPUT_IF_MIPI1	BIT(6)
+#define VOP_OUTPUT_IF_eDP0	BIT(7)
+#define VOP_OUTPUT_IF_eDP1	BIT(8)
+#define VOP_OUTPUT_IF_DP0	BIT(9)
+#define VOP_OUTPUT_IF_DP1	BIT(10)
+#define VOP_OUTPUT_IF_HDMI0	BIT(11)
+#define VOP_OUTPUT_IF_HDMI1	BIT(12)
+
 struct rockchip_mcu_timing {
 	int mcu_pix_total;
 	int mcu_cs_pst;
@@ -72,6 +87,7 @@ struct crtc_state {
 	struct rockchip_crtc *crtc;
 	void *private;
 	ofnode node;
+	struct device_node *ports_node;
 	int crtc_id;
 
 	int format;
@@ -90,6 +106,7 @@ struct crtc_state {
 	bool yuv_overlay;
 	struct rockchip_mcu_timing mcu_timing;
 	u32 dual_channel_swap;
+	u32 feature;
 	struct vop_rect max_output;
 };
 
@@ -121,7 +138,8 @@ struct connector_state {
 	int bus_format;
 	int output_mode;
 	int type;
-	int output_type;
+	int output_if;
+	int output_flags;
 	int color_space;
 	unsigned int bpc;
 

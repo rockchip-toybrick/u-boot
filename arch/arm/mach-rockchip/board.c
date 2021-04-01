@@ -69,7 +69,9 @@
 #include <console.h>
 #include <boot_rkimg.h>
 #include <asm/arch/vendor.h>
-
+#ifdef CONFIG_ROCKCHIP_EINK_DISPLAY
+#include <rk_eink.h>
+#endif
 DECLARE_GLOBAL_DATA_PTR;
 
 __weak int rk_board_late_init(void)
@@ -106,19 +108,54 @@ __weak int rk_board_init(void)
 #define CPUID_LEN	0x10
 #define CPUID_OFF	0x07
 
+#define MAX_ETHERNET	0x2
+
 static int rockchip_set_ethaddr(void)
 {
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
-	char buf[ARP_HLEN_ASCII + 1];
-	u8 ethaddr[ARP_HLEN];
-	int ret;
+	char buf[ARP_HLEN_ASCII + 1], mac[16];
+	u8 ethaddr[ARP_HLEN * MAX_ETHERNET] = {0};
+	int ret, i;
+	bool need_write = false, randomed = false;
 
 	ret = vendor_storage_read(VENDOR_LAN_MAC_ID, ethaddr, sizeof(ethaddr));
-	if (ret > 0 && is_valid_ethaddr(ethaddr)) {
-		sprintf(buf, "%pM", ethaddr);
-		env_set("ethaddr", buf);
+	for (i = 0; i < MAX_ETHERNET; i++) {
+		if (ret <= 0 || !is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
+			if (!randomed) {
+				net_random_ethaddr(&ethaddr[i * ARP_HLEN]);
+				randomed = true;
+			} else {
+				if (i > 0) {
+					memcpy(&ethaddr[i * ARP_HLEN],
+					       &ethaddr[(i - 1) * ARP_HLEN],
+					       ARP_HLEN);
+					ethaddr[i * ARP_HLEN] |= 0x02;
+					ethaddr[i * ARP_HLEN] += (i << 2);
+				}
+			}
+
+			need_write = true;
+		}
+
+		if (is_valid_ethaddr(&ethaddr[i * ARP_HLEN])) {
+			sprintf(buf, "%pM", &ethaddr[i * ARP_HLEN]);
+			if (i == 0)
+				memcpy(mac, "ethaddr", sizeof("ethaddr"));
+			else
+				sprintf(mac, "eth%daddr", i);
+			env_set(mac, buf);
+		}
+	}
+
+	if (need_write) {
+		ret = vendor_storage_write(VENDOR_LAN_MAC_ID,
+					   ethaddr, sizeof(ethaddr));
+		if (ret < 0)
+			printf("%s: vendor_storage_write failed %d\n",
+			       __func__, ret);
 	}
 #endif
+
 	return 0;
 }
 
@@ -327,6 +364,9 @@ int board_late_init(void)
 #if (CONFIG_ROCKCHIP_BOOT_MODE_REG > 0)
 	setup_boot_mode();
 #endif
+#ifdef CONFIG_AMP
+	amp_cpus_on();
+#endif
 #ifdef CONFIG_ROCKCHIP_USB_BOOT
 	boot_from_udisk();
 #endif
@@ -335,6 +375,9 @@ int board_late_init(void)
 #endif
 #ifdef CONFIG_DRM_ROCKCHIP
 	rockchip_show_logo();
+#endif
+#ifdef CONFIG_ROCKCHIP_EINK_DISPLAY
+	rockchip_eink_show_uboot_logo();
 #endif
 	env_fixup();
 	soc_clk_dump();
@@ -625,13 +668,6 @@ parse_fn_t board_bidram_parse_fn(void)
 }
 #endif
 
-#ifdef CONFIG_ROCKCHIP_AMP
-void cpu_secondary_init_r(void)
-{
-	amp_cpus_on();
-}
-#endif
-
 int board_init_f_boot_flags(void)
 {
 	int boot_flags = 0;
@@ -911,11 +947,11 @@ int fit_read_otp_rollback_index(uint32_t fit_index, uint32_t *otp_index)
 		if (ret != TEE_ERROR_ITEM_NOT_FOUND)
 			return ret;
 
-		*otp_index = fit_index;
+		index = 0;
 		printf("Initial otp index as %d\n", fit_index);
 	}
 
-	*otp_index = index;
+	*otp_index = (uint32_t)index;
 #else
 	*otp_index = 0;
 #endif
@@ -941,6 +977,10 @@ void board_quiesce_devices(void *images)
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	/* Destroy atags makes next warm boot safer */
 	atags_destroy();
+#endif
+
+#ifdef CONFIG_ROCKCHIP_REBOOT_TEST
+	do_reset(NULL, 0, 0, NULL);
 #endif
 
 #ifdef CONFIG_FIT_ROLLBACK_PROTECT

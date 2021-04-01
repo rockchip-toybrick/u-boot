@@ -105,6 +105,7 @@ SCRIPT_SPL="${SRCTREE}/scripts/spl.sh"
 SCRIPT_UBOOT="${SRCTREE}/scripts/uboot.sh"
 SCRIPT_LOADER="${SRCTREE}/scripts/loader.sh"
 
+REP_DIR="./rep"
 #########################################################################################################
 function help()
 {
@@ -227,6 +228,29 @@ function process_args()
 			--spl|spl*) # use spl file
 				ARG_SPL_BIN="spl/u-boot-spl.bin"
 				shift 1
+				;;
+			--uboot|--fdt|--optee|--mcu|--bl31) # uboot.img components
+				mkdir -p ${REP_DIR}
+				if [ ! -f $2 ]; then
+					echo "ERROR: No $2"
+					exit 1
+				fi
+				if [ "$1" == "--uboot" ]; then
+					cp $2 ${REP_DIR}/u-boot-nodtb.bin
+				elif [ "$1" == "--fdt" ]; then
+					cp $2 ${REP_DIR}/u-boot.dtb
+				elif [ "$1" == "--optee" ]; then
+					cp $2 ${REP_DIR}/tee.bin
+				elif [ "$1" == "--mcu" ]; then
+					cp $2 ${REP_DIR}/mcu.bin
+				elif [ "$1" == "--bl31" ]; then
+					if ! file $2 | grep 'ELF ' >/dev/null 2>&1 ; then
+						echo "ERROR: $2 is not a bl31.elf file"
+						exit 1
+					fi
+					cp $2 ${REP_DIR}/bl31.elf
+				fi
+				shift 2
 				;;
 			*)
 				#1. FIT scripts args
@@ -620,20 +644,29 @@ function pack_uboot_itb_image()
 			TEE_OFFSET=0x8400000
 		fi
 		TEE_ARG="-t ${TEE_OFFSET}"
-
-		# MCU
-		MCU_ENABLED=`awk -F"," '/MCU=/ { printf $3 }' ${INI} | tr -d ' '`
-		if [ "${MCU_ENABLED}" == "enabled" -o "${MCU_ENABLED}" == "okay" ]; then
-			MCU=`awk -F"," '/MCU=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 5-`
-			cp ${RKBIN}/${MCU} mcu.bin
-			MCU_OFFSET=`awk -F"," '/MCU=/ { printf $2 }' ${INI} | tr -d ' '`
-			MCU_ARG="-m ${MCU_OFFSET}"
-		fi
 	fi
 
+	# MCU
+	MCU_ENABLED=`awk -F"," '/MCU=/ { printf $3 }' ${INI} | tr -d ' '`
+	if [ "${MCU_ENABLED}" == "enabled" -o "${MCU_ENABLED}" == "okay" ]; then
+		MCU=`awk -F"," '/MCU=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 5-`
+		cp ${RKBIN}/${MCU} mcu.bin
+		MCU_OFFSET=`awk -F"," '/MCU=/ { printf $2 }' ${INI} | tr -d ' '`
+		if [ -z ${MCU_OFFSET} ]; then
+			echo "ERROR: No mcu address in ${INI}"
+			exit 1
+		fi
+		MCU_ARG="-m ${MCU_OFFSET}"
+	fi
+
+	# COMPRESSION
 	COMPRESSION=`awk -F"," '/COMPRESSION=/  { printf $1 }' ${INI} | tr -d ' ' | cut -c 13-`
 	if [ ! -z "${COMPRESSION}" -a "${COMPRESSION}" != "none" ]; then
 		COMPRESSION_ARG="-c ${COMPRESSION}"
+	fi
+
+	if [ -d ${REP_DIR} ]; then
+		mv ${REP_DIR}/* ./
 	fi
 
 	SPL_FIT_SOURCE=`sed -n "/CONFIG_SPL_FIT_SOURCE=/s/CONFIG_SPL_FIT_SOURCE=//p" .config | tr -d '""'`
@@ -641,6 +674,7 @@ function pack_uboot_itb_image()
 		cp ${SPL_FIT_SOURCE} u-boot.its
 	else
 		SPL_FIT_GENERATOR=`sed -n "/CONFIG_SPL_FIT_GENERATOR=/s/CONFIG_SPL_FIT_GENERATOR=//p" .config | tr -d '""'`
+		# *.py is the legacy one.
 		if [[ ${SPL_FIT_GENERATOR} == *.py ]]; then
 			${SPL_FIT_GENERATOR} u-boot.dtb > u-boot.its
 		else
@@ -648,7 +682,7 @@ function pack_uboot_itb_image()
 		fi
 	fi
 
-	./tools/mkimage -f u-boot.its -E u-boot.itb
+	./tools/mkimage -f u-boot.its -E u-boot.itb >/dev/null 2>&1
 	echo "pack u-boot.itb okay! Input: ${INI}"
 	echo
 }
@@ -717,6 +751,19 @@ function pack_trust_image()
 
 function pack_fit_image()
 {
+	# check host tools
+	if ! which dtc >/dev/null 2>&1 ; then
+		echo "ERROR: No 'dtc', please: apt-get install device-tree-compiler"
+		exit 1
+	fi
+
+	if [ "${ARM64_TRUSTZONE}" == "y" ]; then
+		if ! python -c "import elftools" ; then
+			echo "ERROR: No python 'pyelftools', please: pip install pyelftools"
+			exit 1
+		fi
+	fi
+
 	# If we don't plan to have uboot in uboot.img in case of: SPL => Trust => Kernel, creating empty files.
 	if [ "${ARG_NO_UBOOT}" == "y" ]; then
 		rm u-boot-nodtb.bin u-boot.dtb -f
@@ -734,6 +781,7 @@ function pack_fit_image()
 		fi
 	fi
 
+	rm ${REP_DIR} -rf
 	echo "pack uboot.img okay! Input: ${INI_TRUST}"
 }
 
