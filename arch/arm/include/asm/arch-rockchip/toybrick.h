@@ -75,6 +75,11 @@ static inline int toybrick_get_flag(char *flag, int *index)
 			*index = 0;
 	}
 
+	if ((strncmp(sn, "TX03568", TOYBRICK_FLAG_LEN) == 0) ||
+			(strncmp(sn, "TXs3568", TOYBRICK_FLAG_LEN) == 0)) {
+		*index = 0;
+	}
+
 	strncpy(flag, sn, TOYBRICK_FLAG_LEN);
 	return 0;
 }
