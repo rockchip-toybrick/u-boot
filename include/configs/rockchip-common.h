@@ -41,6 +41,21 @@
 	BOOT_TARGET_DEVICES_references_RKNAND_without_CONFIG_CMD_RKNAND
 #endif
 
+#ifdef CONFIG_CMD_NAND
+#define BOOTENV_SHARED_NAND	BOOTENV_SHARED_BLKDEV(mtd)
+#define BOOTENV_DEV_NAND(devtypeu, devtypel, instance) \
+	"bootcmd_" #devtypel #instance "=" \
+		"setenv devnum " #instance "; " \
+		"run scan_dev_for_boot_part\0"
+#define BOOTENV_DEV_NAME_NAND	BOOTENV_DEV_NAME_BLKDEV
+#else
+#define BOOTENV_SHARED_NAND
+#define BOOTENV_DEV_NAND \
+	BOOT_TARGET_DEVICES_references_NAND_without_CONFIG_CMD_NAND
+#define BOOTENV_DEV_NAME_NAND \
+	BOOT_TARGET_DEVICES_references_NAND_without_CONFIG_CMD_NAND
+#endif
+
 /* First try to boot from SD (index 1), then eMMC (index 0) */
 #if CONFIG_IS_ENABLED(CMD_MMC)
 	#define BOOT_TARGET_MMC(func) \
@@ -54,6 +69,14 @@
 	#define BOOT_TARGET_RKNAND(func) func(RKNAND, rknand, 0)
 #else
 	#define BOOT_TARGET_RKNAND(func)
+#endif
+
+#if CONFIG_IS_ENABLED(CMD_NAND)
+	#define BOOT_TARGET_NAND(func) \
+		func(NAND, mtd, 1) \
+		func(NAND, mtd, 0)
+#else
+	#define BOOT_TARGET_NAND(func)
 #endif
 
 #if CONFIG_IS_ENABLED(CMD_USB)
@@ -77,6 +100,7 @@
 #define BOOT_TARGET_DEVICES(func) \
 	BOOT_TARGET_MMC(func) \
 	BOOT_TARGET_RKNAND(func) \
+	BOOT_TARGET_NAND(func) \
 	BOOT_TARGET_USB(func) \
 	BOOT_TARGET_PXE(func) \
 	BOOT_TARGET_DHCP(func)
