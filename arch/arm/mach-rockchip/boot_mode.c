@@ -22,6 +22,8 @@ enum {
 	PL,
 };
 
+static u32 bcb_recovery_msg;
+
 static int misc_require_recovery(u32 bcb_offset)
 {
 	struct bootloader_message *bmsg;
@@ -42,14 +44,25 @@ static int misc_require_recovery(u32 bcb_offset)
 
 	cnt = DIV_ROUND_UP(sizeof(struct bootloader_message), dev_desc->blksz);
 	bmsg = memalign(ARCH_DMA_MINALIGN, cnt * dev_desc->blksz);
-	if (blk_dread(dev_desc, part.start + bcb_offset, cnt, bmsg) != cnt)
+	if (blk_dread(dev_desc, part.start + bcb_offset, cnt, bmsg) != cnt) {
 		recovery = 0;
-	else
+	} else {
 		recovery = !strcmp(bmsg->command, "boot-recovery");
+		if (!strcmp(bmsg->recovery, "recovery\n--rk_fwupdate\n"))
+			bcb_recovery_msg = BCB_MSG_RECOVERY_RK_FWUPDATE;
+		else if (!strcmp(bmsg->recovery, "recovery\n--factory_mode=whole") ||
+			 !strcmp(bmsg->recovery, "recovery\n--factory_mode=small"))
+			bcb_recovery_msg = BCB_MSG_RECOVERY_PCBA;
+	}
 
 	free(bmsg);
 out:
 	return recovery;
+}
+
+int get_bcb_recovery_msg(void)
+{
+	return bcb_recovery_msg;
 }
 
 /*

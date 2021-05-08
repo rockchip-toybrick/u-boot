@@ -1083,16 +1083,25 @@ static void dw_mipi_dsi_clear_err(struct dw_mipi_dsi *dsi)
 	dsi_write(dsi, DSI_INT_MSK1, 0);
 }
 
+static int dw_mipi_dsi_connector_pre_init(struct display_state *state)
+{
+	struct connector_state *conn_state = &state->conn_state;
+
+	conn_state->type = DRM_MODE_CONNECTOR_DSI;
+
+	return 0;
+}
+
 static int dw_mipi_dsi_connector_init(struct display_state *state)
 {
 	struct connector_state *conn_state = &state->conn_state;
 	struct dw_mipi_dsi *dsi = dev_get_priv(conn_state->dev);
 
+	conn_state->disp_info  = rockchip_get_disp_info(conn_state->type, dsi->id);
 	dsi->dphy.phy = conn_state->phy;
 
 	conn_state->output_mode = ROCKCHIP_OUT_MODE_P888;
 	conn_state->color_space = V4L2_COLORSPACE_DEFAULT;
-	conn_state->type = DRM_MODE_CONNECTOR_DSI;
 	conn_state->output_if |=
 		dsi->id ? VOP_OUTPUT_IF_MIPI1 : VOP_OUTPUT_IF_MIPI0;
 
@@ -1315,6 +1324,7 @@ static int dw_mipi_dsi_connector_disable(struct display_state *state)
 }
 
 static const struct rockchip_connector_funcs dw_mipi_dsi_connector_funcs = {
+	.pre_init = dw_mipi_dsi_connector_pre_init,
 	.init = dw_mipi_dsi_connector_init,
 	.prepare = dw_mipi_dsi_connector_prepare,
 	.unprepare = dw_mipi_dsi_connector_unprepare,

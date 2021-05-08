@@ -11,6 +11,7 @@
 #include <asm/unaligned.h>
 #include <asm/io.h>
 #include <dm/device.h>
+#include <dm/of_access.h>
 #include <dm/read.h>
 #include <linux/list.h>
 #include <syscon.h>
@@ -730,12 +731,20 @@ retry:
 	return retval;
 }
 
+static int analogix_dp_connector_pre_init(struct display_state *state)
+{
+	struct connector_state *conn_state = &state->conn_state;
+
+	conn_state->type = DRM_MODE_CONNECTOR_eDP;
+
+	return 0;
+}
+
 static int analogix_dp_connector_init(struct display_state *state)
 {
 	struct connector_state *conn_state = &state->conn_state;
 	struct analogix_dp_device *dp = dev_get_priv(conn_state->dev);
 
-	conn_state->type = DRM_MODE_CONNECTOR_eDP;
 	conn_state->output_if |= VOP_OUTPUT_IF_eDP0;
 	conn_state->output_mode = ROCKCHIP_OUT_MODE_AAAA;
 	conn_state->color_space = V4L2_COLORSPACE_DEFAULT;
@@ -744,6 +753,7 @@ static int analogix_dp_connector_init(struct display_state *state)
 	udelay(1);
 	reset_deassert_bulk(&dp->resets);
 
+	conn_state->disp_info  = rockchip_get_disp_info(conn_state->type, dp->id);
 	generic_phy_power_on(&dp->phy);
 	analogix_dp_init_dp(dp);
 
@@ -840,6 +850,7 @@ static int analogix_dp_connector_detect(struct display_state *state)
 }
 
 static const struct rockchip_connector_funcs analogix_dp_connector_funcs = {
+	.pre_init = analogix_dp_connector_pre_init,
 	.init = analogix_dp_connector_init,
 	.get_edid = analogix_dp_connector_get_edid,
 	.enable = analogix_dp_connector_enable,
@@ -857,6 +868,9 @@ static int analogix_dp_probe(struct udevice *dev)
 
 	dp->reg_base = dev_read_addr_ptr(dev);
 
+	dp->id = of_alias_get_id(ofnode_to_np(dev->node), "edp");
+	if (dp->id < 0)
+		dp->id = 0;
 	ret = reset_get_bulk(dev, &dp->resets);
 	if (ret) {
 		dev_err(dev, "failed to get reset control: %d\n", ret);

@@ -22,7 +22,8 @@
 
 #define MTD_PART_NAND_HEAD		"mtdparts="
 #define MTD_ROOT_PART_NUM		"ubi.mtd="
-#define MTD_ROOT_PART_NAME		"root=ubi0:rootfs"
+#define MTD_ROOT_PART_NAME_UBIFS	"root=ubi0:rootfs"
+#define MTD_ROOT_PART_NAME_SQUASHFS	"root=/dev/ubiblock0_0"
 #define MTD_PART_INFO_MAX_SIZE		512
 #define MTD_SINGLE_PART_INFO_MAX_SIZE	40
 
@@ -353,7 +354,7 @@ char *mtd_part_parse(void)
 {
 	char mtd_part_info_temp[MTD_SINGLE_PART_INFO_MAX_SIZE] = {0};
 	u32 length, data_len = MTD_PART_INFO_MAX_SIZE;
-	char mtd_root_part_info[30] = {0};
+	char mtd_root_part_info[40] = {0};
 	struct blk_desc *dev_desc;
 	disk_partition_t info;
 	char *mtd_part_info_p;
@@ -372,7 +373,12 @@ char *mtd_part_parse(void)
 
 	p = part_get_info_by_name(dev_desc, PART_SYSTEM, &info);
 	if (p > 0) {
-		snprintf(mtd_root_part_info, 30, "%s%d %s", MTD_ROOT_PART_NUM, p - 1, MTD_ROOT_PART_NAME);
+		if (strstr(env_get("bootargs"), "rootfstype=squashfs"))
+			snprintf(mtd_root_part_info, ARRAY_SIZE(mtd_root_part_info), "%s%d %s",
+				 MTD_ROOT_PART_NUM, p - 1, MTD_ROOT_PART_NAME_SQUASHFS);
+		else
+			snprintf(mtd_root_part_info, ARRAY_SIZE(mtd_root_part_info), "%s%d %s",
+				 MTD_ROOT_PART_NUM, p - 1, MTD_ROOT_PART_NAME_UBIFS);
 		env_update("bootargs", mtd_root_part_info);
 	}
 
@@ -407,33 +413,42 @@ char *mtd_part_parse(void)
 			 (int)(size_t)info.start << 9,
 			 info.name);
 		strcat(mtd_part_info, ",");
-		if (part_get_info(dev_desc, p + 1, &info) &&
-		    (info.size + info.start + 33) == dev_desc->lba) {
-			if (dev_desc->devnum == BLK_MTD_SPI_NOR) {
-				/* Nor is 64KB erase block(kernel) and gpt table just
-				* resserve 33 sectors for the last partition. This
-				* will erase the backup gpt table by user program,
-				* so reserve one block.
-				*/
-				snprintf(mtd_part_info_p, data_len - 1, "0x%x@0x%x(%s)",
-					(int)(size_t)(info.size -
-					(info.size - 1) %
-					(0x10000 >> 9) - 1) << 9,
-					(int)(size_t)info.start << 9,
-					info.name);
-				break;
+		if (part_get_info(dev_desc, p + 1, &info)) {
+			/* Partition with grow tag in parameter will be resized */
+			if ((info.size + info.start + 64) >= dev_desc->lba) {
+				if (dev_desc->devnum == BLK_MTD_SPI_NOR) {
+					/* Nor is 64KB erase block(kernel) and gpt table just
+					 * resserve 33 sectors for the last partition. This
+					 * will erase the backup gpt table by user program,
+					 * so reserve one block.
+					 */
+					snprintf(mtd_part_info_p, data_len - 1, "0x%x@0x%x(%s)",
+						 (int)(size_t)(info.size -
+						 (info.size - 1) %
+						 (0x10000 >> 9) - 1) << 9,
+						 (int)(size_t)info.start << 9,
+						 info.name);
+					break;
+				} else {
+					/* Nand flash is erased by block and gpt table just
+					 * resserve 33 sectors for the last partition. This
+					 * will erase the backup gpt table by user program,
+					 * so reserve one block.
+					 */
+					snprintf(mtd_part_info_p, data_len - 1, "0x%x@0x%x(%s)",
+						 (int)(size_t)(info.size -
+						 (info.size - 1) %
+						 (mtd->erasesize >> 9) - 1) << 9,
+						 (int)(size_t)info.start << 9,
+						 info.name);
+					break;
+				}
 			} else {
-				/* Nand flash is erased by block and gpt table just
-				* resserve 33 sectors for the last partition. This
-				* will erase the backup gpt table by user program,
-				* so reserve one block.
-				*/
-				snprintf(mtd_part_info_p, data_len - 1, "0x%x@0x%x(%s)",
-					(int)(size_t)(info.size -
-					(info.size - 1) %
-					(mtd->erasesize >> 9) - 1) << 9,
-					(int)(size_t)info.start << 9,
-					info.name);
+				snprintf(mtd_part_info_temp, MTD_SINGLE_PART_INFO_MAX_SIZE - 1,
+					 "0x%x@0x%x(%s)",
+					 (int)(size_t)info.size << 9,
+					 (int)(size_t)info.start << 9,
+					 info.name);
 				break;
 			}
 		}

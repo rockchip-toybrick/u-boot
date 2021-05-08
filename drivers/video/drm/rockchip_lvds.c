@@ -10,6 +10,7 @@
 #include <dm/device.h>
 #include <dm/read.h>
 #include <dm/ofnode.h>
+#include <dm/of_access.h>
 #include <syscon.h>
 #include <regmap.h>
 #include <dm/device.h>
@@ -91,6 +92,7 @@ struct rockchip_lvds_funcs {
 };
 
 struct rockchip_lvds {
+	int id;
 	struct udevice *dev;
 	struct regmap *grf;
 	struct rockchip_phy *phy;
@@ -108,6 +110,15 @@ static inline struct rockchip_lvds *state_to_lvds(struct display_state *state)
 	return dev_get_priv(conn_state->dev);
 }
 
+static int rockchip_lvds_connector_pre_init(struct display_state *state)
+{
+	struct connector_state *conn_state = &state->conn_state;
+
+	conn_state->type = DRM_MODE_CONNECTOR_LVDS;
+
+	return 0;
+}
+
 static int rockchip_lvds_connector_init(struct display_state *state)
 {
 	struct rockchip_lvds *lvds = state_to_lvds(state);
@@ -116,6 +127,7 @@ static int rockchip_lvds_connector_init(struct display_state *state)
 
 	lvds->mode = &conn_state->mode;
 	lvds->phy = conn_state->phy;
+	conn_state->disp_info  = rockchip_get_disp_info(conn_state->type, lvds->id);
 
 	switch (panel->bus_format) {
 	case MEDIA_BUS_FMT_RGB666_1X7X3_JEIDA:	/* jeida-18 */
@@ -138,7 +150,6 @@ static int rockchip_lvds_connector_init(struct display_state *state)
 		break;
 	}
 
-	conn_state->type = DRM_MODE_CONNECTOR_LVDS;
 	conn_state->output_mode = ROCKCHIP_OUT_MODE_P888;
 
 	if ((lvds->format == LVDS_10BIT_MODE_FORMAT_1) ||
@@ -185,6 +196,7 @@ static int rockchip_lvds_connector_disable(struct display_state *state)
 }
 
 static const struct rockchip_connector_funcs rockchip_lvds_connector_funcs = {
+	.pre_init = rockchip_lvds_connector_pre_init,
 	.init = rockchip_lvds_connector_init,
 	.enable = rockchip_lvds_connector_enable,
 	.disable = rockchip_lvds_connector_disable,
@@ -201,6 +213,9 @@ static int rockchip_lvds_probe(struct udevice *dev)
 	lvds->grf = syscon_get_regmap(dev_get_parent(dev));
 	lvds->dual_channel = dev_read_bool(dev, "dual-channel");
 	lvds->data_swap = dev_read_bool(dev, "rockchip,data-swap");
+	lvds->id = of_alias_get_id(ofnode_to_np(dev->node), "lvds");
+	if (lvds->id < 0)
+		lvds->id = 0;
 
 	return 0;
 }

@@ -307,13 +307,18 @@ static void env_fixup(void)
 		}
 	}
 #endif
-	/* If BL32 is disabled, move kernel to lower address. */
+	/* No BL32 ? */
 	if (!(gd->flags & GD_FLG_BL32_ENABLED)) {
-		addr_r = env_get("kernel_addr_no_bl32_r");
+		/*
+		 * [1] Move kernel to lower address if possible.
+		 */
+		addr_r = env_get("kernel_addr_no_low_bl32_r");
 		if (addr_r)
 			env_set("kernel_addr_r", addr_r);
 
 		/*
+		 * [2] Move ramdisk at BL32 position if need.
+		 *
 		 * 0x0a200000 and 0x08400000 are rockchip traditional address
 		 * of BL32 and ramdisk:
 		 *
@@ -329,10 +334,21 @@ static void env_fixup(void)
 			if (u_addr_r == 0x0a200000)
 				env_set("ramdisk_addr_r", "0x08400000");
 		}
-
-	/* If BL32 is enlarged, move ramdisk right behind it */
 	} else {
 		mem = param_parse_optee_mem();
+
+		/*
+		 * [1] Move kernel forward if possible.
+		 */
+		if (mem.base > SZ_128M) {
+			addr_r = env_get("kernel_addr_no_low_bl32_r");
+			if (addr_r)
+				env_set("kernel_addr_r", addr_r);
+		}
+
+		/*
+		 * [2] Move ramdisk backward if optee enlarge.
+		 */
 		end = mem.base + mem.size;
 		u_addr_r = env_get_ulong("ramdisk_addr_r", 16, 0);
 		if (u_addr_r >= mem.base && u_addr_r < end)
@@ -342,6 +358,8 @@ static void env_fixup(void)
 
 static void cmdline_handle(void)
 {
+	struct blk_desc *dev_desc;
+
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	struct tag *t;
 
@@ -354,6 +372,16 @@ static void cmdline_handle(void)
 			env_update("bootargs", "fuse.programmed=0");
 	}
 #endif
+	dev_desc = rockchip_get_bootdev();
+	if (!dev_desc)
+		return;
+
+	if (get_bcb_recovery_msg() == BCB_MSG_RECOVERY_RK_FWUPDATE) {
+		if (dev_desc->if_type == IF_TYPE_MMC && dev_desc->devnum == 1)
+			env_update("bootargs", "sdfwupdate");
+		else if (dev_desc->if_type == IF_TYPE_USB && dev_desc->devnum == 0)
+			env_update("bootargs", "usbfwupdate");
+	}
 }
 
 int board_late_init(void)
@@ -825,6 +853,10 @@ int bootm_board_start(void)
 #endif
 	/* disable bootm relcation to save boot time */
 	bootm_no_reloc();
+
+	/* PCBA test needs more permission */
+	if (get_bcb_recovery_msg() == BCB_MSG_RECOVERY_PCBA)
+		env_update("bootargs", "androidboot.selinux=permissive");
 
 	/* sysmem */
 	hotkey_run(HK_SYSMEM);

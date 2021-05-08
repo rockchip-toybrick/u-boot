@@ -851,6 +851,9 @@ static const struct spinand_manufacturer *spinand_manufacturers[] = {
 #ifdef CONFIG_SPI_NAND_BIWIN
 	&biwin_spinand_manufacturer,
 #endif
+#ifdef CONFIG_SPI_NAND_ETRON
+	&etron_spinand_manufacturer,
+#endif
 };
 
 static int spinand_manufacturer_detect(struct spinand_device *spinand)
@@ -1168,7 +1171,7 @@ static int spinand_bind(struct udevice *udev)
 	struct udevice *bdev;
 
 	ret = blk_create_devicef(udev, "mtd_blk", "blk", IF_TYPE_MTD,
-				 1, 512, 0, &bdev);
+				 BLK_MTD_SPI_NAND, 512, 0, &bdev);
 	if (ret)
 		printf("Cannot create block device\n");
 #endif

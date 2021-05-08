@@ -5,6 +5,7 @@
  */
 
 #include <asm/unaligned.h>
+#include <boot_rkimg.h>
 #include <config.h>
 #include <common.h>
 #include <errno.h>
@@ -53,7 +54,10 @@ static LIST_HEAD(rockchip_display_list);
 static LIST_HEAD(logo_cache_list);
 
 static unsigned long memory_start;
+static unsigned long cubic_lut_memory_start;
 static unsigned long memory_end;
+static struct base2_info base_parameter;
+static uint32_t crc32_table[256];
 
 /*
  * the phy types are used by different connectors in public.
@@ -71,6 +75,118 @@ struct public_phy_data {
 	int public_phy_type;
 	bool phy_init;
 };
+
+void rockchip_display_make_crc32_table(void)
+{
+	uint32_t c;
+	int n, k;
+	unsigned long poly;		/* polynomial exclusive-or pattern */
+	/* terms of polynomial defining this crc (except x^32): */
+	static const char p[] = {0, 1, 2, 4, 5, 7, 8, 10, 11, 12, 16, 22, 23, 26};
+
+	/* make exclusive-or pattern from polynomial (0xedb88320L) */
+	poly = 0L;
+	for (n = 0; n < sizeof(p) / sizeof(char); n++)
+		poly |= 1L << (31 - p[n]);
+
+	for (n = 0; n < 256; n++) {
+		c = (unsigned long)n;
+		for (k = 0; k < 8; k++)
+		c = c & 1 ? poly ^ (c >> 1) : c >> 1;
+		crc32_table[n] = cpu_to_le32(c);
+	}
+}
+
+uint32_t rockchip_display_crc32c_cal(unsigned char *data, int length)
+{
+	int i;
+	uint32_t crc;
+	crc = 0xFFFFFFFF;
+
+	for (i = 0; i < length; i++) {
+		crc = crc32_table[(crc ^ *data) & 0xff] ^ (crc >> 8);
+		data++;
+	}
+
+	return crc ^ 0xffffffff;
+}
+
+int rockchip_get_baseparameter(void)
+{
+	struct blk_desc *dev_desc;
+	disk_partition_t part_info;
+	int block_num = 2048;
+	char baseparameter_buf[block_num * RK_BLK_SIZE] __aligned(ARCH_DMA_MINALIGN);
+	int ret = 0;
+
+	dev_desc = rockchip_get_bootdev();
+	if (!dev_desc) {
+		printf("%s: Could not find device\n", __func__);
+		return -ENOENT;
+	}
+
+	if (part_get_info_by_name(dev_desc, "baseparameter", &part_info) < 0) {
+		printf("Could not find baseparameter partition\n");
+		return -ENOENT;
+	}
+
+	ret = blk_dread(dev_desc, part_info.start, block_num, (void *)baseparameter_buf);
+	if (ret < 0) {
+		printf("read baseparameter failed\n");
+		return ret;
+	}
+
+	memcpy(&base_parameter, baseparameter_buf, sizeof(base_parameter));
+	if (strncasecmp(base_parameter.head_flag, "BASP", 4)) {
+		printf("warning: bad baseparameter\n");
+		memset(&base_parameter, 0, sizeof(base_parameter));
+	}
+	rockchip_display_make_crc32_table();
+
+	return ret;
+}
+
+struct base2_disp_info *rockchip_get_disp_info(int type, int id)
+{
+	struct base2_disp_info *disp_info;
+	struct base2_disp_header *disp_header;
+	int i = 0, offset = -1;
+	u32 crc_val;
+	void *base_parameter_addr = (void *)&base_parameter;
+
+	for (i = 0; i < 8; i++) {
+		disp_header = &base_parameter.disp_header[i];
+		if (disp_header->connector_type == type &&
+		    disp_header->connector_id == id) {
+			printf("disp info %d, type:%d, id:%d\n", i, type, id);
+			offset = disp_header->offset;
+			break;
+		}
+	}
+
+	if (offset < 0)
+		return NULL;
+	disp_info = base_parameter_addr + offset;
+	if (disp_info->screen_info[0].type != type ||
+	    disp_info->screen_info[0].id != id) {
+		printf("connector type or id is error, type:%d, id:%d\n",
+		       disp_info->screen_info[0].type,
+		       disp_info->screen_info[0].id);
+		return NULL;
+	}
+
+	if (strncasecmp(disp_info->disp_head_flag, "DISP", 4))
+		return NULL;
+
+	crc_val = rockchip_display_crc32c_cal((unsigned char *)disp_info, sizeof(struct base2_disp_info) - 4);
+
+	if (crc_val != disp_info->crc) {
+		printf("error: connector type[%d], id[%d] disp info crc check error\n", type, id);
+		return NULL;
+	}
+
+	return disp_info;
+}
 
 /* check which kind of public phy does connector use */
 static int check_public_use_phy(struct display_state *state)
@@ -141,6 +257,7 @@ static void init_display_buffer(ulong base)
 {
 	memory_start = base + DRM_ROCKCHIP_FB_SIZE;
 	memory_end = memory_start;
+	cubic_lut_memory_start = memory_start + MEMORY_POOL_SIZE;
 }
 
 void *get_display_buffer(int size)
@@ -162,6 +279,34 @@ void *get_display_buffer(int size)
 static unsigned long get_display_size(void)
 {
 	return memory_end - memory_start;
+}
+
+static unsigned long get_single_cubic_lut_size(void)
+{
+	ulong cubic_lut_size;
+	int cubic_lut_step = CONFIG_ROCKCHIP_CUBIC_LUT_SIZE;
+
+	/* This is depend on IC designed */
+	cubic_lut_size = (cubic_lut_step * cubic_lut_step * cubic_lut_step + 1) / 2 * 16;
+	cubic_lut_size = roundup(cubic_lut_size, PAGE_SIZE);
+
+	return cubic_lut_size;
+}
+
+static unsigned long get_cubic_lut_offset(int crtc_id)
+{
+	return crtc_id * get_single_cubic_lut_size();
+}
+
+unsigned long get_cubic_lut_buffer(int crtc_id)
+{
+	return cubic_lut_memory_start + crtc_id * get_single_cubic_lut_size();
+}
+
+static unsigned long get_cubic_memory_size(void)
+{
+	/* Max support 4 cubic lut */
+	return get_single_cubic_lut_size() * 4;
 }
 
 bool can_direct_logo(int bpp)
@@ -515,6 +660,28 @@ static int display_get_timing(struct display_state *state)
 	}
 
 	return -ENODEV;
+}
+
+static int display_pre_init(void)
+{
+	struct display_state *state;
+	int ret = 0;
+
+	list_for_each_entry(state, &rockchip_display_list, head) {
+		struct connector_state *conn_state = &state->conn_state;
+		const struct rockchip_connector *conn = conn_state->connector;
+		const struct rockchip_connector_funcs *conn_funcs = conn->funcs;
+		struct crtc_state *crtc_state = &state->crtc_state;
+		struct rockchip_crtc *crtc = crtc_state->crtc;
+
+		if (conn_funcs->pre_init) {
+			ret = conn_funcs->pre_init(state);
+			if (ret)
+				printf("pre init conn error\n");
+		}
+		crtc->vps[crtc_state->crtc_id].output_type = conn_state->type;
+	}
+	return ret;
 }
 
 static int display_init(struct display_state *state)
@@ -1317,6 +1484,21 @@ static struct udevice *rockchip_of_find_connector(ofnode endpoint)
 	return dev;
 }
 
+static bool rockchip_get_display_path_status(ofnode endpoint)
+{
+	ofnode ep;
+	uint phandle;
+
+	if (ofnode_read_u32(endpoint, "remote-endpoint", &phandle))
+		return false;
+
+	ep = ofnode_get_by_phandle(phandle);
+	if (!ofnode_valid(ep) || !ofnode_is_available(ep))
+		return false;
+
+	return true;
+}
+
 static struct rockchip_phy *rockchip_of_find_phy(struct udevice *dev)
 {
 	struct udevice *phy_dev;
@@ -1544,10 +1726,36 @@ static int rockchip_display_probe(struct udevice *dev)
 		s->crtc_state.dev = crtc_dev;
 		s->crtc_state.crtc = crtc;
 		s->crtc_state.crtc_id = get_crtc_id(np_to_ofnode(ep_node));
-		s->crtc_state.crtc->vps[s->crtc_state.crtc_id].enable = true;
 		s->node = node;
-		if (is_ports_node)
+
+		if (is_ports_node) { /* only vop2 will get into here */
+			ofnode vp_node = np_to_ofnode(port_node);
+			static bool get_plane_mask_from_dts;
+
 			s->crtc_state.ports_node = port_parent_node;
+			if (!get_plane_mask_from_dts) {
+				ofnode vp_sub_node;
+				int vp_id = 0;
+				bool vp_enable = false;
+
+				ofnode_for_each_subnode(vp_node, np_to_ofnode(port_parent_node)) {
+					vp_id = ofnode_read_u32_default(vp_node, "reg", 0);
+					ret = ofnode_read_u32_default(vp_node, "rockchip,plane-mask", 0);
+					if (ret) {
+						s->crtc_state.crtc->vps[vp_id].plane_mask = ret;
+						s->crtc_state.crtc->assign_plane |= true;
+						printf("get vp%d plane mask:0x%x from dts\n", vp_id, ret);
+					}
+
+					/* To check current vp status */
+					vp_enable = false;
+					ofnode_for_each_subnode(vp_sub_node, vp_node)
+						vp_enable |= rockchip_get_display_path_status(vp_sub_node);
+					s->crtc_state.crtc->vps[vp_id].enable = vp_enable;
+				}
+				get_plane_mask_from_dts = true;
+			}
+		}
 
 		if (bridge)
 			bridge->state = s;
@@ -1578,6 +1786,8 @@ static int rockchip_display_probe(struct udevice *dev)
 		debug("Failed to found available display route\n");
 		return -ENODEV;
 	}
+	rockchip_get_baseparameter();
+	display_pre_init();
 
 	uc_priv->xsize = DRM_ROCKCHIP_FB_WIDTH;
 	uc_priv->ysize = DRM_ROCKCHIP_FB_HEIGHT;
@@ -1614,6 +1824,12 @@ void rockchip_display_fixup(void *blob)
 						    (u64)get_display_size());
 		if (offset < 0)
 			printf("failed to reserve drm-loader-logo memory\n");
+
+		offset = fdt_update_reserved_memory(blob, "rockchip,drm-cubic-lut",
+						    (u64)cubic_lut_memory_start,
+						    (u64)get_cubic_memory_size());
+		if (offset < 0)
+			printf("failed to reserve drm-cubic-lut memory\n");
 	} else {
 		printf("can't found rockchip,drm-logo, use rockchip,fb-logo\n");
 		/* Compatible with rkfb display, only need reserve memory */
@@ -1680,6 +1896,18 @@ void rockchip_display_fixup(void *blob)
 		FDT_SET_U32("overscan,right_margin", s->conn_state.overscan.right_margin);
 		FDT_SET_U32("overscan,top_margin", s->conn_state.overscan.top_margin);
 		FDT_SET_U32("overscan,bottom_margin", s->conn_state.overscan.bottom_margin);
+
+		if (s->conn_state.disp_info) {
+			FDT_SET_U32("bcsh,brightness", s->conn_state.disp_info->bcsh_info.brightness);
+			FDT_SET_U32("bcsh,contrast", s->conn_state.disp_info->bcsh_info.contrast);
+			FDT_SET_U32("bcsh,saturation", s->conn_state.disp_info->bcsh_info.saturation);
+			FDT_SET_U32("bcsh,hue", s->conn_state.disp_info->bcsh_info.hue);
+		}
+
+		if (s->conn_state.disp_info->cubic_lut_data.size &&
+		    CONFIG_ROCKCHIP_CUBIC_LUT_SIZE)
+			FDT_SET_U32("cubic_lut,offset", get_cubic_lut_offset(s->crtc_state.crtc_id));
+
 #undef FDT_SET_U32
 	}
 }

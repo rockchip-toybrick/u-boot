@@ -5,9 +5,7 @@
  */
 
 #include <common.h>
-#include <cpu_func.h>
 #include <dm.h>
-#include <dm/device_compat.h>
 #include <errno.h>
 #include <scmi_agent.h>
 #include <asm/cache.h>
@@ -28,7 +26,6 @@ int scmi_dt_get_smt_buffer(struct udevice *dev, struct scmi_smt *smt)
 	int ret;
 	struct ofnode_phandle_args args;
 	struct resource resource;
-	fdt32_t faddr;
 	phys_addr_t paddr;
 
 	ret = dev_read_phandle_with_args(dev, "shmem", NULL, 0, 0, &args);
@@ -39,9 +36,7 @@ int scmi_dt_get_smt_buffer(struct udevice *dev, struct scmi_smt *smt)
 	if (ret)
 		return ret;
 
-	faddr = cpu_to_fdt32(resource.start);
-	paddr = ofnode_translate_address(args.node, &faddr);
-
+	paddr = resource.start;
 	smt->size = resource_size(&resource);
 	if (smt->size < sizeof(struct scmi_smt_header)) {
 		dev_err(dev, "Shared memory buffer too small\n");
@@ -54,8 +49,9 @@ int scmi_dt_get_smt_buffer(struct udevice *dev, struct scmi_smt *smt)
 
 #ifdef CONFIG_ARM
 	if (dcache_status())
-		mmu_set_region_dcache_behaviour((uintptr_t)smt->buf,
-						smt->size, DCACHE_OFF);
+		mmu_set_region_dcache_behaviour(round_down((ulong)smt->buf, SZ_4K),
+						round_up((ulong)smt->size, SZ_4K),
+						DCACHE_OFF);
 #endif
 
 	return 0;

@@ -70,7 +70,7 @@ static void boot_devtype_init(void)
 		env_set("devtype", devtype);
 		env_set("devnum", devnum);
 
-#ifdef CONFIG_DM_MMC
+#ifdef CONFIG_MMC
 		if (!strcmp("mmc", devtype))
 			mmc_initialize(gd->bd);
 #endif
@@ -89,7 +89,7 @@ static void boot_devtype_init(void)
 #endif
 
 	/* Low priority: if not get bootdev by atags, scan all possible */
-#ifdef CONFIG_DM_MMC
+#ifdef CONFIG_MMC
 	mmc_initialize(gd->bd);
 #endif
 	ret = run_command_list(devtype_num_set, -1, 0);

@@ -45,14 +45,16 @@ enum rockchip_mcu_cmd {
 /*
  * display output interface supported by rockchip lcdc
  */
-#define ROCKCHIP_OUT_MODE_P888	0
-#define ROCKCHIP_OUT_MODE_P666	1
-#define ROCKCHIP_OUT_MODE_P565	2
+#define ROCKCHIP_OUT_MODE_P888		0
+#define ROCKCHIP_OUT_MODE_BT1120	0
+#define ROCKCHIP_OUT_MODE_P666		1
+#define ROCKCHIP_OUT_MODE_P565		2
+#define ROCKCHIP_OUT_MODE_BT656		5
 #define ROCKCHIP_OUT_MODE_S888		8
 #define ROCKCHIP_OUT_MODE_S888_DUMMY	12
 #define ROCKCHIP_OUT_MODE_YUV420	14
 /* for use special outface */
-#define ROCKCHIP_OUT_MODE_AAAA	15
+#define ROCKCHIP_OUT_MODE_AAAA		15
 
 #define VOP_OUTPUT_IF_RGB	BIT(0)
 #define VOP_OUTPUT_IF_BT1120	BIT(1)
@@ -87,7 +89,7 @@ struct crtc_state {
 	struct rockchip_crtc *crtc;
 	void *private;
 	ofnode node;
-	struct device_node *ports_node;
+	struct device_node *ports_node; /* if (ports_node) it's vop2; */
 	int crtc_id;
 
 	int format;
@@ -142,6 +144,8 @@ struct connector_state {
 	int output_flags;
 	int color_space;
 	unsigned int bpc;
+
+	struct base2_disp_info *disp_info; /* disp_info from baseparameter 2.0 */
 
 	struct {
 		u32 *lut;
@@ -200,8 +204,10 @@ int drm_mode_vrefresh(const struct drm_display_mode *mode);
 int display_send_mcu_cmd(struct display_state *state, u32 type, u32 val);
 bool drm_mode_is_420(const struct drm_display_info *display,
 		     struct drm_display_mode *mode);
+struct base2_disp_info *rockchip_get_disp_info(int type, int id);
 
 void drm_mode_max_resolution_filter(struct hdmi_edid_data *edid_data,
 				    struct vop_rect *max_output);
+unsigned long get_cubic_lut_buffer(int crtc_id);
 
 #endif
