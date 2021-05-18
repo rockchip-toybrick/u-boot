@@ -6,6 +6,8 @@
  */
 
 #include <asm/io.h>
+#include <android_avb/avb_ops_user.h>
+#include <android_avb/rk_avb_ops_user.h>
 #include <asm/arch/boot_mode.h>
 #include <asm/arch/chip_info.h>
 #include <write_keybox.h>
@@ -15,7 +17,6 @@
 #ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 #include <asm/arch/toybrick.h>
 #endif
-
 #include <rockusb.h>
 
 #define ROCKUSB_INTERFACE_CLASS	0xff
@@ -454,7 +455,7 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 					curlun->sense_data = SS_WRITE_ERROR;
 					return -EIO;
 				}
-			} else if (type == 1){
+			} else if (type == 1) {
 				/* RPMB */
 				rc =
 				write_keybox_to_secure_storage((u8 *)data,
@@ -464,55 +465,70 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 					return -EIO;
 				}
 			} else if (type == 2) {
+				if (memcmp(data, "RKSN", 4) == 0) {
+					if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN)) != 0) {//Seed
+						printf("trusty_write_toybrick_seed error!");
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
 
-				if (memcmp(data, "RKSN", 4) != 0) {
-					printf("tag not equal\n");
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
+					rc = toybrick_set_sn((char __user *)data+8);
+					if (rc < 0) {
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+					rc = toybrick_set_mac((char __user *)data+8+TOYBRICK_SN_LEN);
+					if (rc < 0) {
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+
+					rc = toybrick_set_actcode((char __user *)data+8+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN+12+16);
+					if (rc < 0) {
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+				} else {
+				/* security storage */
+#ifdef CONFIG_RK_AVB_LIBAVB_USER
+					debug("%s call rk_avb_write_perm_attr %d, %d\n",
+					      __func__, vhead->id, vhead->size);
+					rc = rk_avb_write_perm_attr(vhead->id,
+							    (char __user *)data,
+							    vhead->size);
+					if (rc < 0) {
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+#else
+					printf("Please enable CONFIG_RK_AVB_LIBAVB_USER\n");
+					if (rc < 0) {
+						printf("tag not equal\n");
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+#endif
 				}
-
-				if (trusty_write_toybrick_seed((uint32_t *)((char __user *)data+8+TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN)) != 0) {//Seed
-					printf("trusty_write_toybrick_seed error!");
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
-				}
-
-				rc = toybrick_set_sn((char __user *)data+8);
-				if (rc < 0) {
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
-				}
-
-				rc = toybrick_set_mac((char __user *)data+8+TOYBRICK_SN_LEN);
-				if (rc < 0) {
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
-				}
-
-				rc = toybrick_set_actcode((char __user *)data+8+TOYBRICK_SN_LEN+TOYBRICK_MAC_LEN+12+16);
-				if (rc < 0) {
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
-				}
-
 			} else if (type == 3) {
-
-				if (memcmp(data, "RKSN", 4) != 0) {
+				if (memcmp(data, "RKSN", 4) == 0) {
+					if (vhead->size - 8 != 0x16f) {
+						printf("check extrakey size fail!\n");
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+					if (trusty_write_toybrick_extrakey((unsigned char *)data+8, 0x16f) != 0) {
+						printf("trusty_write_toybrick_extrakey error!");
+						curlun->sense_data = SS_WRITE_ERROR;
+						return -EIO;
+					}
+				} else {
 					printf("tag not equal\n");
 					curlun->sense_data = SS_WRITE_ERROR;
 					return -EIO;
 				}
-				if (vhead->size - 8 != 0x16f) {
-					printf("check extrakey size fail!\n");
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
-				}
-				if (trusty_write_toybrick_extrakey((unsigned char *)data+8, 0x16f) != 0) {
-					printf("trusty_write_toybrick_extrakey error!");
-					curlun->sense_data = SS_WRITE_ERROR;
-					return -EIO;
-				}
-			} 
+			} else {
+				return -EINVAL;
+			}
 
 			common->residue -= common->data_size;
 
@@ -577,7 +593,7 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 				return -EIO;
 			}
 			vhead->size = rc;
-		} else if (type == 1){
+		} else if (type == 1) {
 			/* RPMB */
 			rc =
 			read_raw_data_from_secure_storage((u8 *)data,
@@ -588,7 +604,6 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 			}
 			vhead->size = rc;
 		} else if (type == 2) {
-
 			rc = toybrick_get_sn((char __user *)data);
 			if (!rc) {
 				curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
@@ -620,6 +635,19 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 		} else if (type == 3) {
 			rc=trusty_read_toybrick_cpu_id((uint8_t *)data);
 			vhead->size = common->data_size-8;
+			/* security storage */
+#ifdef CONFIG_RK_AVB_LIBAVB_USER
+			rc = rk_avb_read_perm_attr(vhead->id,
+						   (char __user *)data,
+						   vhead->size);
+			if (rc < 0)
+				return -EIO;
+			vhead->size = rc;
+#else
+			printf("Please enable CONFIG_RK_AVB_LIBAVB_USER!\n");
+#endif
+		} else {
+			return -EINVAL;
 		}
 
 		common->residue   -= common->data_size;

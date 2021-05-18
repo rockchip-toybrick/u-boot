@@ -679,9 +679,9 @@ int arch_cpu_init(void)
 	 * Init the i2c0 iomux and use it to control electronic voltmeter
 	 * to detect voltage.
 	 */
-#if defined(CONFIG_SPL_KERNEL_BOOT) && defined(CONFIG_SPL_DM_FUEL_GAUGE)
+  #if defined(CONFIG_SPL_KERNEL_BOOT) && defined(CONFIG_SPL_DM_FUEL_GAUGE)
 	writel(0x00770011, PMU_GRF_BASE + PMUGRF_GPIO0B_IOMUX_H);
-#endif
+  #endif
 
 #elif defined(CONFIG_SUPPORT_USBPLUG)
 	/* Just set region 0 to unsecure */
@@ -717,11 +717,11 @@ int arch_cpu_init(void)
 	writel(0xFFFF1111, &grf->gpio1a_iomux_l);
   #endif
 
-  #if defined(CONFIG_ROCKCHIP_SFC) && (defined(CONFIG_SPL_BUILD) || defined(CONFIG_SUPPORT_USBPLUG))
+#endif
+
 	/* GPIO0_D6 pull down in default, pull up it for SPI Flash */
 	writel(((0x3 << 12) << 16) | (0x1 << 12), GRF1_GPIO0D_P);
-  #endif
-#endif
+
 	return 0;
 }
 #endif
