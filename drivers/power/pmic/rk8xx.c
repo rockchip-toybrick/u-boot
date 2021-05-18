@@ -486,7 +486,7 @@ static int rk8xx_probe(struct udevice *dev)
 	uint8_t on_source = 0, off_source = 0;
 	uint8_t pwron_key = 0, lp_off_msk = 0, lp_act_msk = 0;
 	uint8_t power_en0, power_en1, power_en2, power_en3;
-	uint8_t value;
+	uint8_t value, value_save0;
 
 	/* read Chip variant */
 	if (device_is_compatible(dev, "rockchip,rk817") ||
@@ -543,6 +543,12 @@ static int rk8xx_probe(struct udevice *dev)
 		init_data = rk817_init_reg;
 		init_data_num = ARRAY_SIZE(rk817_init_reg);
 		/* judge whether save the PMIC_POWER_EN register */
+		value_save0 = pmic_reg_read(dev, RK817_POWER_EN_SAVE0);
+		printk(KERN_ERR "chensq priv->not_save_power_en is 0x%x,RK817_POWER_EN_SAVE0 0x%x\n", priv->not_save_power_en, value_save0);
+		if (value_save0 != 0x00) {//RK817_POWER_EN_SAVE0 default value == 0x00
+			pmic_reg_write(dev, RK817_POWER_EN_SAVE0, 0x00);
+			printk(KERN_ERR "chensq RK817_POWER_EN_SAVE0!=0,set it values 0x00\n");
+		}
 		if (priv->not_save_power_en)
 			break;
 		power_en0 = pmic_reg_read(dev, RK817_POWER_EN0);
