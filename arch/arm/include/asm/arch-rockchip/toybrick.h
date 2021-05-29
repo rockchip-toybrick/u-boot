@@ -22,7 +22,7 @@
 #define TOYBRICK_DATA_LEN	(TOYBRICK_SN_LEN + TOYBRICK_MAC_LEN + TOYBRICK_ACTCODE_LEN)
 #define TOYBRICK_SHA_LEN	(TOYBRICK_DATA_LEN + SHA256_SUM_LEN)
 
-#define TOYBRICK_FLAG_LEN	7
+#define TOYBRICK_FLAG_LEN	6
 
 static inline int toybrick_get_sn(char *sn)
 {
@@ -66,18 +66,13 @@ static inline int toybrick_get_flag(char *flag, int *index)
 	
 	*index = -1;
 
-	if ((strncmp(sn, "TX03310", TOYBRICK_FLAG_LEN) == 0) ||
-			(strncmp(sn, "TXs3310", TOYBRICK_FLAG_LEN) == 0)) {
+	if ((strncmp(sn, "TX0331", TOYBRICK_FLAG_LEN) == 0) ||
+			(strncmp(sn, "TXs331", TOYBRICK_FLAG_LEN) == 0)) {
 		if ((i2c_get_chip_for_busnum(1, 0x1c, 1, &dev) == 0) &&
 				(dm_i2c_read(dev, 0, buf, 1) == 0))
 			*index = 1;
 		else
 			*index = 0;
-	}
-
-	if ((strncmp(sn, "TX03568", TOYBRICK_FLAG_LEN) == 0) ||
-			(strncmp(sn, "TXs3568", TOYBRICK_FLAG_LEN) == 0)) {
-		*index = 0;
 	}
 
 	strncpy(flag, sn, TOYBRICK_FLAG_LEN);
