@@ -29,10 +29,6 @@
 #define TOYBRICK_FLAG_LEN	6
 #define BOARD_THRESHOLDS_LEN	9
 
-#ifndef GPIO0_D5
-#define GPIO0_D5		29
-#endif
-
 static inline int toybrick_get_sn(char *sn)
 {
 	return vendor_storage_read(TOYBRICK_SN_ID, sn, TOYBRICK_SN_LEN);
@@ -82,6 +78,18 @@ static inline int toybrick_get_flag(char *flag, int *index)
 		return 0;
 	}
 
+	ret = fdtdec_get_int(blob, node, "adc-io", -1);
+	if (ret >= 0) {
+		gpio_request(ret, "adc-io");
+		val = gpio_get_value(ret);
+		gpio_free(ret);
+		printf("%s: adc-io(%d) value is %d\n", __func__, ret, val);
+		if (val == 0) {
+			*index = 0;
+			return 0;
+		}
+	}
+
 	ret = fdtdec_get_int_array(blob, node, "io-channels", chns, 2);
 	if (ret) {
 		printf("Get io-channels failed\n");
@@ -96,22 +104,13 @@ static inline int toybrick_get_flag(char *flag, int *index)
 		return 0;
 	}
 
-#if defined(CONFIG_ROCKCHIP_RK3568)
-	gpio_request(GPIO0_D5, "board-id");
-	val = gpio_get_value(GPIO0_D5);
-	gpio_free(GPIO0_D5);
-	if (val == 0) {
-		*index = 0;
-		return 0;
-	}
-#endif
 	ret = adc_channel_single_shot("saradc", chns[1], &val);
 	if (ret) {
 		printf("Get adc value failed\n");
 		*index = -1;
 		return 0;
 	}
-
+	printf("%s: adc-value is %d\n", __func__, val);
 	id = 1;
 	for (i = 0; i < BOARD_THRESHOLDS_LEN; i++) {
 		if (ths[i] >= val)
