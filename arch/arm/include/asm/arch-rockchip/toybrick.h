@@ -8,8 +8,11 @@
 
 #include <linux/string.h>
 #include <asm/arch/vendor.h>
+#include <common.h>
+#include <dm.h>
 #include <i2c.h>
 #include <u-boot/sha256.h>
+#include <adc.h>
 
 #define TOYBRICK_SN_ID		VENDOR_SN_ID
 #define TOYBRICK_MAC_ID		VENDOR_LAN_MAC_ID
@@ -23,6 +26,7 @@
 #define TOYBRICK_SHA_LEN	(TOYBRICK_DATA_LEN + SHA256_SUM_LEN)
 
 #define TOYBRICK_FLAG_LEN	6
+#define BOARD_THRESHOLDS_LEN	9
 
 static inline int toybrick_get_sn(char *sn)
 {
@@ -56,26 +60,59 @@ static inline int toybrick_set_actcode(char *actcode)
 
 static inline int toybrick_get_flag(char *flag, int *index)
 {
-	struct udevice *dev;
-	u8 buf[8];
+	const void *blob = gd->fdt_blob;
+	int node, ret, i;
+	u32 chns[2], ths[BOARD_THRESHOLDS_LEN], val, id;
 	char sn[TOYBRICK_SN_LEN + 1];
-	int ret = toybrick_get_sn(sn);
-
-	if (ret != TOYBRICK_SN_LEN)
+	
+	if (toybrick_get_sn(sn) <= 0)
 		return -EINVAL;
 	
-	*index = -1;
+	strncpy(flag, sn, TOYBRICK_FLAG_LEN);
 
-	if ((strncmp(sn, "TX0331", TOYBRICK_FLAG_LEN) == 0) ||
-			(strncmp(sn, "TXs331", TOYBRICK_FLAG_LEN) == 0)) {
-		if ((i2c_get_chip_for_busnum(1, 0x1c, 1, &dev) == 0) &&
-				(dm_i2c_read(dev, 0, buf, 1) == 0))
-			*index = 1;
-		else
-			*index = 0;
+	node = fdt_node_offset_by_compatible(blob, 0, "board-id");
+	if (node < 0) {
+		printf("Get board-id node failed\n");
+		*index = -1;
+		return 0;
 	}
 
-	strncpy(flag, sn, TOYBRICK_FLAG_LEN);
+	ret = fdtdec_get_int(blob, node, "custom-id", -1);
+	if (ret >= 0) {
+		printf("Custom id is set, set board id %d\n", ret);
+		*index = ret;
+		return 0;
+	}
+
+	ret = fdtdec_get_int_array(blob, node, "io-channels", chns, 2);
+	if (ret) {
+		printf("Get io-channels failed\n");
+		*index = -1;
+		return 0;
+	}
+
+	ret = fdtdec_get_int_array(blob, node, "thresholds", ths, BOARD_THRESHOLDS_LEN);
+	if (ret) {
+		printf("Get threshholds failed\n");
+		*index = -1;
+		return 0;
+	}
+
+	ret = adc_channel_single_shot("saradc", chns[1], &val);
+	if (ret) {
+		printf("Get adc value failed\n");
+		*index = -1;
+		return 0;
+	}
+
+	id = BOARD_THRESHOLDS_LEN + 1;
+	for (i = BOARD_THRESHOLDS_LEN - 1; i >= 0; i--) {
+		if (ths[i] >= val)
+			break;
+
+		id--;
+	}
+	*index = id;
 	return 0;
 }
 
