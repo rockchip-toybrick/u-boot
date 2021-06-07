@@ -13,6 +13,7 @@
 #include <i2c.h>
 #include <u-boot/sha256.h>
 #include <adc.h>
+#include <asm/gpio.h>
 
 #define TOYBRICK_SN_ID		VENDOR_SN_ID
 #define TOYBRICK_MAC_ID		VENDOR_LAN_MAC_ID
@@ -27,6 +28,10 @@
 
 #define TOYBRICK_FLAG_LEN	6
 #define BOARD_THRESHOLDS_LEN	9
+
+#ifndef GPIO0_D5
+#define GPIO0_D5		29
+#endif
 
 static inline int toybrick_get_sn(char *sn)
 {
@@ -77,13 +82,6 @@ static inline int toybrick_get_flag(char *flag, int *index)
 		return 0;
 	}
 
-	ret = fdtdec_get_int(blob, node, "custom-id", -1);
-	if (ret >= 0) {
-		printf("Custom id is set, set board id %d\n", ret);
-		*index = ret;
-		return 0;
-	}
-
 	ret = fdtdec_get_int_array(blob, node, "io-channels", chns, 2);
 	if (ret) {
 		printf("Get io-channels failed\n");
@@ -98,6 +96,15 @@ static inline int toybrick_get_flag(char *flag, int *index)
 		return 0;
 	}
 
+#if defined(CONFIG_ROCKCHIP_RK3568)
+	gpio_request(GPIO0_D5, "board-id");
+	val = gpio_get_value(GPIO0_D5);
+	gpio_free(GPIO0_D5);
+	if (val == 0) {
+		*index = 0;
+		return 0;
+	}
+#endif
 	ret = adc_channel_single_shot("saradc", chns[1], &val);
 	if (ret) {
 		printf("Get adc value failed\n");
@@ -105,12 +112,12 @@ static inline int toybrick_get_flag(char *flag, int *index)
 		return 0;
 	}
 
-	id = BOARD_THRESHOLDS_LEN + 1;
-	for (i = BOARD_THRESHOLDS_LEN - 1; i >= 0; i--) {
+	id = 1;
+	for (i = 0; i < BOARD_THRESHOLDS_LEN; i++) {
 		if (ths[i] >= val)
 			break;
 
-		id--;
+		id++;
 	}
 	*index = id;
 	return 0;
