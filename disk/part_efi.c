@@ -477,6 +477,8 @@ static int part_test_efi(struct blk_desc *dev_desc)
 		if (part_efi_repair(dev_desc, h_gpt_pte, h_gpt_head,
 				    0, 1))
 			printf("Primary GPT repair fail!\n");
+		/* Force repair backup GPT for factory or ota upgrade. */
+		backup_gpt_valid = 0;
 	}
 
 	if (head_gpt_valid == 1 && backup_gpt_valid == 0) {
@@ -826,9 +828,18 @@ err:
 	return ret;
 }
 
-static void gpt_convert_efi_name_to_char(char *s, efi_char16_t *es, int n)
+/**
+ * gpt_convert_efi_name_to_char() - convert u16 string to char string
+ *
+ * TODO: this conversion only supports ANSI characters
+ *
+ * @s:	target buffer
+ * @es:	u16 string to be converted
+ * @n:	size of target buffer
+ */
+static void gpt_convert_efi_name_to_char(char *s, void *es, int n)
 {
-	char *ess = (char *)es;
+	char *ess = es;
 	int i, j;
 
 	memset(s, '\0', n);
@@ -1072,9 +1083,6 @@ static int is_pmbr_valid(legacy_mbr * mbr)
 {
 	int i = 0;
 
-	if (!mbr || le16_to_cpu(mbr->signature) != MSDOS_MBR_SIGNATURE)
-		return 0;
-
 #ifdef CONFIG_ARCH_ROCKCHIP
 	/*
 	 * In sd-update card, we use RKPARM partition in bootloader to load
@@ -1086,6 +1094,10 @@ static int is_pmbr_valid(legacy_mbr * mbr)
 	 */
 	return 1;
 #endif
+
+	if (!mbr || le16_to_cpu(mbr->signature) != MSDOS_MBR_SIGNATURE)
+		return 0;
+
 	for (i = 0; i < 4; i++) {
 		if (pmbr_part_valid(&mbr->partition_record[i])) {
 			return 1;

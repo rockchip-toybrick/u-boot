@@ -14,7 +14,6 @@
 #define ATTEST_UUID_SIZE     (ATAP_HEX_UUID_LEN+1)
 #define ATTEST_CA_OUT_SIZE     256
 
-uint32_t test_optee(void);
 uint32_t trusty_read_rollback_index(uint32_t slot, uint64_t *value);
 uint32_t trusty_write_rollback_index(uint32_t slot, uint64_t value);
 uint32_t trusty_read_permanent_attributes(uint8_t *attributes, uint32_t size);
@@ -39,6 +38,7 @@ uint32_t trusty_read_toybrick_cpu_id(uint8_t *buf);
 uint32_t trusty_read_toybrick_SnMacAc(uint8_t *data, uint32_t size);
 uint32_t trusty_write_toybrick_SnMacAc(uint8_t *data, uint32_t size);
 uint32_t trusty_write_toybrick_extrakey(uint8_t *data, uint32_t size);
+uint32_t trusty_write_ta_encryption_key(uint32_t *buf, uint32_t length);
 uint32_t trusty_read_permanent_attributes_flag(uint8_t *attributes);
 uint32_t trusty_write_permanent_attributes_flag(uint8_t attributes);
 uint32_t trusty_attest_dh(uint8_t *dh, uint32_t *dh_size);

@@ -1256,10 +1256,10 @@ int read_mr(struct dram_info *dram, u32 rank, u32 mr_num, u32 dramtype)
 				       ((dqmap >> (i * 4)) & 0xf));
 		}
 	} else {
-		ret = (readl(&dram->ddrgrf->ddr_grf_status[1]) & 0xff);
+		temp = (readl(&dram->ddrgrf->ddr_grf_status[1]) & 0xff);
 	}
 
-	return ret;
+	return temp;
 }
 
 /* before call this function autorefresh should be disabled */
@@ -2186,7 +2186,7 @@ static void dram_all_config(struct dram_info *dram,
 		cs_pst = (readl(pctl_base + DDR_PCTL2_ADDRMAP0) & 0x1f) +
 			6 + 2;
 		if (cs_pst > 28)
-			cs_cap[0] = 1 << cs_pst;
+			cs_cap[0] = 1llu << cs_pst;
 	}
 
 	writel(((((cs_cap[1] >> 20) / 64) & 0xff) << 8) |
@@ -2492,6 +2492,8 @@ static u64 dram_detect_cap(struct dram_info *dram,
 			else
 				cap_info->bw = 0;
 		}
+		if (cap_info->bw > 0)
+			cap_info->dbw = 1;
 	}
 
 	writel(pwrctl, pctl_base + DDR_PCTL2_PWRCTL);
@@ -2941,6 +2943,126 @@ static void copy_fsp_param_to_ddr(void)
 }
 #endif
 
+static void pctl_modify_trfc(struct ddr_pctl_regs *pctl_regs,
+			     struct sdram_cap_info *cap_info, u32 dram_type,
+			     u32 freq)
+{
+	u64 cs0_cap;
+	u32 die_cap;
+	u32 trfc_ns, trfc4_ns;
+	u32 trfc, txsnr;
+	u32 txs_abort_fast = 0;
+	u32 tmp;
+
+	cs0_cap = sdram_get_cs_cap(cap_info, 0, dram_type);
+	die_cap = (u32)(cs0_cap >> (20 + (cap_info->bw - cap_info->dbw)));
+
+	switch (dram_type) {
+	case DDR3:
+		if (die_cap <= DIE_CAP_512MBIT)
+			trfc_ns = 90;
+		else if (die_cap <= DIE_CAP_1GBIT)
+			trfc_ns = 110;
+		else if (die_cap <= DIE_CAP_2GBIT)
+			trfc_ns = 160;
+		else if (die_cap <= DIE_CAP_4GBIT)
+			trfc_ns = 260;
+		else
+			trfc_ns = 350;
+		txsnr = MAX(5, ((trfc_ns + 10) * freq + 999) / 1000);
+		break;
+
+	case DDR4:
+		if (die_cap <= DIE_CAP_2GBIT) {
+			trfc_ns = 160;
+			trfc4_ns = 90;
+		} else if (die_cap <= DIE_CAP_4GBIT) {
+			trfc_ns = 260;
+			trfc4_ns = 110;
+		} else if (die_cap <= DIE_CAP_8GBIT) {
+			trfc_ns = 350;
+			trfc4_ns = 160;
+		} else {
+			trfc_ns = 550;
+			trfc4_ns = 260;
+		}
+		txsnr = ((trfc_ns + 10) * freq + 999) / 1000;
+		txs_abort_fast = ((trfc4_ns + 10) * freq + 999) / 1000;
+		break;
+
+	case LPDDR3:
+		if (die_cap <= DIE_CAP_4GBIT)
+			trfc_ns = 130;
+		else
+			trfc_ns = 210;
+		txsnr = MAX(2, ((trfc_ns + 10) * freq + 999) / 1000);
+		break;
+
+	case LPDDR4:
+	case LPDDR4X:
+		if (die_cap <= DIE_CAP_4GBIT)
+			trfc_ns = 130;
+		else if (die_cap <= DIE_CAP_8GBIT)
+			trfc_ns = 180;
+		else if (die_cap <= DIE_CAP_16GBIT)
+			trfc_ns = 280;
+		else
+			trfc_ns = 380;
+		txsnr = MAX(2, ((trfc_ns + 10) * freq + 999) / 1000);
+		break;
+
+	default:
+		return;
+	}
+	trfc = (trfc_ns * freq + 999) / 1000;
+
+	for (int i = 0; pctl_regs->pctl[i][0] != 0xffffffff; i++) {
+		switch (pctl_regs->pctl[i][0]) {
+		case DDR_PCTL2_RFSHTMG:
+			tmp = pctl_regs->pctl[i][1];
+			/* t_rfc_min */
+			tmp &= ~((u32)0x3ff);
+			tmp |= ((trfc + 1) / 2) & 0x3ff;
+			pctl_regs->pctl[i][1] = tmp;
+			break;
+
+		case DDR_PCTL2_DRAMTMG8:
+			if (dram_type == DDR3 || dram_type == DDR4) {
+				tmp = pctl_regs->pctl[i][1];
+				/* t_xs_x32 */
+				tmp &= ~((u32)0x7f);
+				tmp |= ((txsnr + 63) / 64) & 0x7f;
+
+				if (dram_type == DDR4) {
+					/* t_xs_abort_x32 */
+					tmp &= ~((u32)(0x7f << 16));
+					tmp |= (((txs_abort_fast + 63) / 64) & 0x7f) << 16;
+					/* t_xs_fast_x32 */
+					tmp &= ~((u32)(0x7f << 24));
+					tmp |= (((txs_abort_fast + 63) / 64) & 0x7f) << 24;
+				}
+
+				pctl_regs->pctl[i][1] = tmp;
+			}
+			break;
+
+		case DDR_PCTL2_DRAMTMG14:
+			if (dram_type == LPDDR3 ||
+			    dram_type == LPDDR4 || dram_type == LPDDR4X) {
+				tmp = pctl_regs->pctl[i][1];
+				/* t_xsr */
+				tmp &= ~((u32)0xfff);
+				tmp |= ((txsnr + 1) / 2) & 0xfff;
+				pctl_regs->pctl[i][1] = tmp;
+			}
+			break;
+
+		default:
+			break;
+		}
+	}
+}
+
 void ddr_set_rate(struct dram_info *dram,
 		  struct rv1126_sdram_params *sdram_params,
 		  u32 freq, u32 cur_freq, u32 dst_fsp,
@@ -2959,6 +3081,8 @@ void ddr_set_rate(struct dram_info *dram,
 	sdram_params_new->ch.cap_info.rank = sdram_params->ch.cap_info.rank;
 	sdram_params_new->ch.cap_info.bw = sdram_params->ch.cap_info.bw;
 
+	pctl_modify_trfc(&sdram_params_new->pctl_regs,
+			 &sdram_params->ch.cap_info, dramtype, freq);
 	pre_set_rate(dram, sdram_params_new, dst_fsp, dst_fsp_lp4);
 
 	while ((readl(pctl_base + DDR_PCTL2_STAT) &

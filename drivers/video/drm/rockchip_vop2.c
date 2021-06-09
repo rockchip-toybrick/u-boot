@@ -138,6 +138,7 @@
 #define DSP_RB_SWAP				2
 #define CORE_DCLK_DIV_EN_SHIFT			4
 #define P2I_EN_SHIFT				5
+#define DSP_FILED_POL				6
 #define INTERLACE_EN_SHIFT			7
 #define POST_DSP_OUT_R2Y_SHIFT			15
 #define PRE_DITHER_DOWN_EN_SHIFT		16
@@ -1108,8 +1109,8 @@ static void vop2_post_config(struct display_state *state, struct vop2 *vop2)
 	u32 bg_ovl_dly, bg_dly, pre_scan_dly;
 	u16 hsync_len = mode->crtc_hsync_end - mode->crtc_hsync_start;
 
-	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
-		vsize = round_down(vsize, 2);
+	hsize = round_down(hsize, 2);
+	vsize = round_down(vsize, 2);
 
 	hact_st += hdisplay * (100 - conn_state->overscan.left_margin) / 200;
 	hact_end = hact_st + hsize;
@@ -1232,9 +1233,19 @@ static void vop2_global_initial(struct vop2 *vop2, struct display_state *state)
 		/* store plane mask for vop2_fixup_dts */
 		for (i = 0; i < vop2->data->nr_vps; i++) {
 			layer_nr = vop2->vp_plane_mask[i].attached_layers_nr;
-			for (j = 0; j < layer_nr; j++) {
-				layer_phy_id = vop2->vp_plane_mask[i].attached_layers[j];
-				vop2->vp_plane_mask[i].plane_mask |= BIT(layer_phy_id);
+			/* rk3566 only support 3+3 policy */
+			if (soc_is_rk3566() && active_vp_num == 1) {
+				if (cstate->crtc->vps[i].enable) {
+					for (j = 0; j < 3; j++) {
+						layer_phy_id = vop2->vp_plane_mask[i].attached_layers[j];
+						vop2->vp_plane_mask[i].plane_mask |= BIT(layer_phy_id);
+					}
+				}
+			} else {
+				for (j = 0; j < layer_nr; j++) {
+					layer_phy_id = vop2->vp_plane_mask[i].attached_layers[j];
+					vop2->vp_plane_mask[i].plane_mask |= BIT(layer_phy_id);
+				}
 			}
 		}
 	}
@@ -1576,6 +1587,8 @@ static int rockchip_vop2_init(struct display_state *state)
 		vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
 				INTERLACE_EN_SHIFT, 1, false);
 		vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
+				DSP_FILED_POL, 1, false);
+		vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
 				P2I_EN_SHIFT, 1, false);
 		vtotal += vtotal + 1;
 	} else {
@@ -1705,6 +1718,15 @@ static int rockchip_vop2_set_plane(struct display_state *state)
 		printf("ERROR: output w[%d] exceeded max width[%d]\n",
 		       crtc_w, cstate->max_output.width);
 		return -EINVAL;
+	}
+
+	/*
+	 * This is workaround solution for IC design:
+	 * esmart can't support scale down when actual_w % 16 == 1.
+	 */
+	if (src_w > crtc_w && (src_w & 0xf) == 1) {
+		printf("WARN: vp%d unsupported act_w[%d] mode 16 = 1 when scale down\n", cstate->crtc_id, src_w);
+		src_w -= 1;
 	}
 
 	act_info = (src_h - 1) << 16;
