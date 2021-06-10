@@ -544,10 +544,10 @@ static int rk8xx_probe(struct udevice *dev)
 		init_data_num = ARRAY_SIZE(rk817_init_reg);
 		/* judge whether save the PMIC_POWER_EN register */
 		value_save0 = pmic_reg_read(dev, RK817_POWER_EN_SAVE0);
-		printk(KERN_ERR "chensq priv->not_save_power_en is 0x%x,RK817_POWER_EN_SAVE0 0x%x\n", priv->not_save_power_en, value_save0);
+		printk(KERN_ERR "priv->not_save_power_en is 0x%x,RK817_POWER_EN_SAVE0 0x%x\n", priv->not_save_power_en, value_save0);
 		if (value_save0 != 0x00) {//RK817_POWER_EN_SAVE0 default value == 0x00
 			pmic_reg_write(dev, RK817_POWER_EN_SAVE0, 0x00);
-			printk(KERN_ERR "chensq RK817_POWER_EN_SAVE0!=0,set it values 0x00\n");
+			printk(KERN_ERR "RK817_POWER_EN_SAVE0!=0,set it values 0x00\n");
 		}
 		if (priv->not_save_power_en)
 			break;
