@@ -15,8 +15,8 @@
 #include <adc.h>
 #include <asm/gpio.h>
 
-#define TOYBRICK_SN_ID		VENDOR_SN_ID
-#define TOYBRICK_MAC_ID		VENDOR_LAN_MAC_ID
+#define TOYBRICK_SN_ID		SN_ID
+#define TOYBRICK_MAC_ID		LAN_MAC_ID
 #define TOYBRICK_ACTCODE_ID	0xa0
 
 #define TOYBRICK_SN_LEN		64
