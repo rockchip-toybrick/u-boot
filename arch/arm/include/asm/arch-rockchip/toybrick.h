@@ -70,6 +70,7 @@ static inline int toybrick_get_flag(char *flag, int *index)
 		return -EINVAL;
 	
 	strncpy(flag, sn, TOYBRICK_FLAG_LEN);
+	flag[TOYBRICK_SN_LEN] = 0;
 
 	node = fdt_node_offset_by_compatible(blob, 0, "board-id");
 	if (node < 0) {
