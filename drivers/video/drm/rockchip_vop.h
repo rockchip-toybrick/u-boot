@@ -7,6 +7,7 @@
 #ifndef _ROCKCHIP_VOP_H_
 #define _ROCKCHIP_VOP_H_
 #include "rockchip_display.h"
+#include <asm/gpio.h>
 
 /*
  * major: IP major vertion, used for IP structure
@@ -233,10 +234,11 @@ struct vop_reg_data {
 
 struct vop_reg {
 	uint32_t mask;
-	uint32_t offset:12;
+	uint32_t offset:17;
 	uint32_t shift:5;
 	uint32_t begin_minor:4;
 	uint32_t end_minor:4;
+	uint32_t reserved:2;
 	uint32_t major:3;
 	uint32_t write_mask:1;
 };
@@ -474,6 +476,8 @@ struct vop {
 	const struct vop_csc_table *csc_table;
 	const struct vop_csc *win_csc;
 	int win_offset;
+
+	struct gpio_desc mcu_rs_gpio;
 };
 
 static inline void vop_writel(struct vop *vop, uint32_t offset, uint32_t v)

@@ -368,3 +368,119 @@ void board_debug_uart_init(void)
 #endif /* defined(CONFIG_DEBUG_UART_BASE) */
 }
 
+static int fdt_fixup_cpu_opp_table(const void *blob)
+{
+	int opp_node, old_opp_node;
+	int cpu_node, sub_node;
+	int len;
+	u32 phandle;
+	u32 *pp;
+	bool is_opp_enabled;
+
+	opp_node = fdt_path_offset(blob, "/rk3308bs-cpu0-opp-table");
+	if (opp_node < 0) {
+		printf("Failed to get rk3308bs-cpu0-opp-table node\n");
+		return -EINVAL;
+	}
+
+	phandle = fdt_get_phandle(blob, opp_node);
+	if (!phandle) {
+		printf("Failed to get cpu opp table phandle\n");
+		return -EINVAL;
+	}
+
+	cpu_node = fdt_path_offset(blob, "/cpus");
+	if (cpu_node < 0) {
+		printf("Failed to get cpus node\n");
+		return -EINVAL;
+	}
+
+	fdt_for_each_subnode(sub_node, blob, cpu_node) {
+		pp = (u32 *)fdt_getprop(blob, sub_node, "operating-points-v2",
+					&len);
+		if (!pp)
+			continue;
+		pp[0] = cpu_to_fdt32(phandle);
+	}
+
+	old_opp_node = fdt_path_offset(blob, "/cpu0-opp-table");
+	if (old_opp_node < 0) {
+		printf("Failed to get cpu0-opp-table node\n");
+		return -EINVAL;
+	}
+
+	is_opp_enabled = false;
+	sub_node = fdt_subnode_offset(blob, old_opp_node, "opp-1296000000");
+	if (sub_node >= 0) {
+		if (fdt_stringlist_search(blob, sub_node,
+					  "status", "okay") >= 0)
+			is_opp_enabled = true;
+	}
+
+	sub_node = fdt_subnode_offset(blob, opp_node, "opp-1296000000");
+	if (sub_node >= 0 && is_opp_enabled) {
+		if (fdt_setprop_string((void *)blob, sub_node,
+				       "status", "okay") < 0)
+			printf("Failed to set 1296 okay\n");
+	}
+
+	is_opp_enabled = false;
+	sub_node = fdt_subnode_offset(blob, old_opp_node, "opp-1200000000");
+	if (sub_node >= 0) {
+		if (fdt_stringlist_search(blob, sub_node,
+					  "status", "okay") >= 0)
+			is_opp_enabled = true;
+	}
+
+	sub_node = fdt_subnode_offset(blob, opp_node, "opp-1200000000");
+	if (sub_node >= 0 && is_opp_enabled) {
+		if (fdt_setprop_string((void *)blob, sub_node,
+				       "status", "okay") < 0)
+			printf("Failed to set 1200 okay\n");
+	}
+
+	return 0;
+}
+
+static int fdt_fixup_dmc_opp_table(const void *blob)
+{
+	int opp_node, dmc_node;
+	int len;
+	u32 phandle;
+	u32 *pp;
+
+	opp_node = fdt_path_offset(blob, "/rk3308bs-dmc-opp-table");
+	if (opp_node < 0) {
+		printf("Failed to get rk3308bs-dmc-opp-table node\n");
+		return -EINVAL;
+	}
+
+	phandle = fdt_get_phandle(blob, opp_node);
+	if (!phandle) {
+		printf("Failed to get dmc opp table phandle\n");
+		return -EINVAL;
+	}
+
+	dmc_node = fdt_path_offset(blob, "/dmc");
+	if (dmc_node < 0) {
+		printf("Failed to get dmc node\n");
+		return -EINVAL;
+	}
+
+	pp = (u32 *)fdt_getprop(blob, dmc_node, "operating-points-v2", &len);
+	if (!pp)
+		return 0;
+	pp[0] = cpu_to_fdt32(phandle);
+
+	return 0;
+}
+
+int rk_board_fdt_fixup(const void *blob)
+{
+	if (soc_is_rk3308bs()) {
+		fdt_fixup_cpu_opp_table(blob);
+		fdt_fixup_dmc_opp_table(blob);
+	}
+
+	return 0;
+}

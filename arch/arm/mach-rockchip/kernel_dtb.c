@@ -245,6 +245,9 @@ static int dtb_check_ok(void *fdt, void *ufdt)
 		}
 	}
 
+	if (!compare[0])
+		return 1;
+
 	if (compare[0] && compare[1])
 		return !memcmp(compare[0], compare[1], strlen(compare[0]));
 
@@ -253,11 +256,18 @@ static int dtb_check_ok(void *fdt, void *ufdt)
 
 int init_kernel_dtb(void)
 {
-	ulong fdt_addr;
+	ulong fdt_addr = 0;
 	void *ufdt_blob;
 	int ret = -ENODEV;
 
-	fdt_addr = env_get_ulong("fdt_addr_r", 16, 0);
+	/*
+	 * If memory size <= 128MB, we firstly try to get "fdt_addr1_r".
+	 */
+	if (gd->ram_size <= SZ_128M)
+		fdt_addr = env_get_ulong("fdt_addr1_r", 16, 0);
+
+	if (!fdt_addr)
+		fdt_addr = env_get_ulong("fdt_addr_r", 16, 0);
 	if (!fdt_addr) {
 		printf("No Found FDT Load Address.\n");
 		return -ENODEV;
@@ -279,7 +289,7 @@ int init_kernel_dtb(void)
 	}
 
 dtb_embed:
-	if (!fdt_check_header(gd->fdt_blob_kern)) {
+	if (gd->fdt_blob_kern) {
 		if (!dtb_check_ok((void *)gd->fdt_blob_kern, (void *)gd->fdt_blob)) {
 			printf("Embedded kernel dtb mismatch this platform!\n");
 			return -EINVAL;
@@ -297,11 +307,9 @@ dtb_embed:
 		memcpy((void *)fdt_addr, gd->fdt_blob_kern,
 		       fdt_totalsize(gd->fdt_blob_kern));
 		printf("DTB: %s\n", CONFIG_EMBED_KERNEL_DTB_PATH);
-	}
-
-	if (fdt_check_header((void *)fdt_addr)) {
+	} else {
 		printf("Failed to get kernel dtb, ret=%d\n", ret);
-		return ret;
+		return -ENOENT;
 	}
 
 dtb_okay:

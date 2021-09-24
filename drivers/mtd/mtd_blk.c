@@ -10,6 +10,7 @@
 #include <dm.h>
 #include <errno.h>
 #include <image.h>
+#include <linux/log2.h>
 #include <malloc.h>
 #include <nand.h>
 #include <part.h>
@@ -350,12 +351,10 @@ static __maybe_unused int mtd_map_erase(struct mtd_info *mtd, loff_t offset,
 	return 0;
 }
 
-char *mtd_part_parse(void)
+char *mtd_part_parse(struct blk_desc *dev_desc)
 {
 	char mtd_part_info_temp[MTD_SINGLE_PART_INFO_MAX_SIZE] = {0};
 	u32 length, data_len = MTD_PART_INFO_MAX_SIZE;
-	char mtd_root_part_info[40] = {0};
-	struct blk_desc *dev_desc;
 	disk_partition_t info;
 	char *mtd_part_info_p;
 	struct mtd_info *mtd;
@@ -363,13 +362,17 @@ char *mtd_part_parse(void)
 	int ret;
 	int p;
 
+#ifndef CONFIG_SPL_BUILD
 	dev_desc = rockchip_get_bootdev();
+#endif
 	if (!dev_desc)
 		return NULL;
 
 	mtd = (struct mtd_info *)dev_desc->bdev->priv;
 	if (!mtd)
 		return NULL;
+#ifndef CONFIG_SPL_BUILD
+	char mtd_root_part_info[40] = {0};
 
 	p = part_get_info_by_name(dev_desc, PART_SYSTEM, &info);
 	if (p > 0) {
@@ -381,7 +384,7 @@ char *mtd_part_parse(void)
 				 MTD_ROOT_PART_NUM, p - 1, MTD_ROOT_PART_NAME_UBIFS);
 		env_update("bootargs", mtd_root_part_info);
 	}
-
+#endif
 	mtd_part_info = (char *)calloc(MTD_PART_INFO_MAX_SIZE, sizeof(char));
 	if (!mtd_part_info) {
 		printf("%s: Fail to malloc!", __func__);
@@ -510,7 +513,7 @@ ulong mtd_dread(struct udevice *udev, lbaint_t start,
 			spi->mode |= SPI_DMA_PREPARE;
 		mtd_read(mtd, off, rwsize, &retlen_nor, dst);
 		if (desc->op_flag == BLK_PRE_RW)
-			spi->mode |= SPI_DMA_PREPARE;
+			spi->mode &= ~SPI_DMA_PREPARE;
 
 		if (retlen_nor == rwsize)
 			return blkcnt;
@@ -649,6 +652,20 @@ static int mtd_blk_probe(struct udevice *udev)
 		mtd = dev_get_priv(udev->parent);
 #endif
 	}
+
+	/* Fill mtd devices information */
+	if (is_power_of_2(mtd->erasesize))
+		mtd->erasesize_shift = ffs(mtd->erasesize) - 1;
+	else
+		mtd->erasesize_shift = 0;
+
+	if (is_power_of_2(mtd->writesize))
+		mtd->writesize_shift = ffs(mtd->writesize) - 1;
+	else
+		mtd->writesize_shift = 0;
+
+	mtd->erasesize_mask = (1 << mtd->erasesize_shift) - 1;
+	mtd->writesize_mask = (1 << mtd->writesize_shift) - 1;
 
 	desc->bdev->priv = mtd;
 	sprintf(desc->vendor, "0x%.4x", 0x2207);

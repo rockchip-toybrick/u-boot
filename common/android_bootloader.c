@@ -259,7 +259,9 @@ static int sysmem_alloc_uncomp_kernel(ulong andr_hdr,
 		kaddr -= hdr->page_size;
 		if (sysmem_free((phys_addr_t)kaddr))
 			return -EINVAL;
-
+#ifdef CONFIG_SKIP_RELOCATE_UBOOT
+		sysmem_free(CONFIG_SYS_TEXT_BASE);
+#endif
 		/*
 		 * Use smaller Ratio to get larger estimated uncompress
 		 * kernel size.
@@ -1080,10 +1082,14 @@ int android_bootloader_boot_flow(struct blk_desc *dev_desc,
 		printf("Close optee client failed!\n");
 #endif
 
+#ifdef CONFIG_AMP
+	return android_bootloader_boot_kernel(load_address);
+#else
 	android_bootloader_boot_kernel(load_address);
 
 	/* TODO: If the kernel doesn't boot mark the selected slot as bad. */
 	return -1;
+#endif
 }
 
 int android_avb_boot_flow(unsigned long kernel_address)

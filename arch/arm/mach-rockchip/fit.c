@@ -227,9 +227,9 @@ int fit_image_pre_process(const void *fit)
 {
 	int ret;
 
-#ifdef CONFIG_USING_KERNEL_DTB
-	sysmem_free((phys_addr_t)gd->fdt_blob);
-#endif
+	if ((gd->flags & GD_FLG_KDTB_READY) && !gd->fdt_blob_kern)
+		sysmem_free((phys_addr_t)gd->fdt_blob);
+
 	ret = fit_image_fixup_alloc(fit, FIT_FDT_PROP,
 				    "fdt_addr_r", MEM_FDT);
 	if (ret < 0)
@@ -322,13 +322,6 @@ static int fit_image_load_resource(const void *fit, struct blk_desc *dev_desc,
 	return fit_image_load_one(fit, dev_desc, part, FIT_MULTI_PROP,
 				  data, IS_ENABLED(CONFIG_FIT_SIGNATURE));
 }
-
-#else
-static int fit_image_load_fdt(const void *fit, struct blk_desc *dev_desc,
-			      disk_partition_t *part, void *data)
-{
-	return fit_image_load_one(fit, dev_desc, part, FIT_FDT_PROP, data, 1);
-}
 #endif
 
 /* Calculate what we really need */
@@ -410,16 +403,9 @@ static void fit_msg(const void *fit)
 	FIT_I("%ssigned, %sconf required\n",
 	      fit_is_signed(fit, gd_fdt_blob()) ? "" : "no ",
 	      fit_sig_require_conf(fit, gd_fdt_blob()) ? "" : "no ");
-
-#ifndef CONFIG_ROCKCHIP_RESOURCE_IMAGE
-	int noffset;
-
-	noffset = fit_default_conf_get_node(fit, FIT_FDT_PROP);
-	printf("DTB: %s\n", fdt_get_name(fit, noffset, NULL));
-#endif
 }
 
-int rockchip_read_fit_dtb(void *fdt_addr, char **hash, int *hash_size)
+int fit_image_init_resource(void)
 {
 	int conf_noffset __maybe_unused;
 	ulong rsce __maybe_unused;
@@ -476,14 +462,6 @@ int rockchip_read_fit_dtb(void *fdt_addr, char **hash, int *hash_size)
 		FIT_I("Failed to create resource list\n");
 		goto out;
 	}
-
-	ret = rockchip_read_resource_dtb(fdt_addr, hash, hash_size);
-#else
-	ret = fit_image_load_fdt(fit, dev_desc, &part, fdt_addr);
-	if (ret) {
-		FIT_I("Failed to load fdt\n");
-		goto out;
-	}
 #endif
 
 	fit_msg(fit);
@@ -492,3 +470,4 @@ out:
 
 	return ret;
 }
+

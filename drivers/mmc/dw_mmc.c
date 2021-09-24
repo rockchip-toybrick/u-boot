@@ -447,8 +447,6 @@ static int dwmci_send_cmd(struct mmc *mmc, struct mmc_cmd *cmd,
 		}
 	}
 
-	udelay(100);
-
 	return ret;
 }
 
@@ -602,6 +600,9 @@ static int dwmci_setup_bus(struct dwmci_host *host, u32 freq)
 		debug("%s: Didn't get source clock value.\n", __func__);
 		return -EINVAL;
 	}
+
+	if (sclk == 0)
+		return -EINVAL;
 
 	if (sclk == freq)
 		div = 0;	/* bypass mode */

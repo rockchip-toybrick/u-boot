@@ -280,7 +280,7 @@ int fdt_initrd(void *fdt, ulong initrd_start, ulong initrd_end)
 	return 0;
 }
 
-static int fdt_bootargs_append(void *fdt, char *data)
+int fdt_bootargs_append(void *fdt, char *data)
 {
 	const char *arr_bootargs[] = { "bootargs", "bootargs_ext" };
 	int nodeoffset, len;
@@ -305,9 +305,9 @@ static int fdt_bootargs_append(void *fdt, char *data)
 			if (!str)
 				return -ENOMEM;
 
-			fdt_increase_size(fdt, strlen(data) + 1);
+			fdt_increase_size(fdt, 512);
 			snprintf(str, len, "%s %s", bootargs, data);
-			ret = fdt_setprop(fdt, nodeoffset, "bootargs",
+			ret = fdt_setprop(fdt, nodeoffset, arr_bootargs[i],
 					  str, len);
 			if (ret < 0)
 				printf("WARNING: could not set bootargs %s.\n", fdt_strerror(ret));
@@ -397,7 +397,7 @@ int fdt_chosen(void *fdt)
 				env_update("bootargs", bootargs);
 #endif
 #ifdef CONFIG_MTD_BLK
-				char *mtd_par_info = mtd_part_parse();
+				char *mtd_par_info = mtd_part_parse(NULL);
 
 				if (mtd_par_info) {
 					if (memcmp(env_get("devtype"), "mtd", 3) == 0)
@@ -652,20 +652,13 @@ int fdt_update_reserved_memory(void *blob, char *name, u64 start, u64 size)
 	int nodeoffset, len, err;
 	u8 tmp[16]; /* Up to 64-bit address + 64-bit size */
 
-#if 0
-	/*name is rockchip_logo*/
-	nodeoffset = fdt_find_or_add_subnode(blob, 0, "reserved-memory");
-	if (nodeoffset < 0)
-		return nodeoffset;
-	printf("hjc>>reserved-memory>>%s, nodeoffset:%d\n", __func__, nodeoffset);
-	nodeoffset = fdt_find_or_add_subnode(blob, nodeoffset, name);
-	if (nodeoffset < 0)
-		return nodeoffset;
-#else
 	nodeoffset = fdt_node_offset_by_compatible(blob, 0, name);
 	if (nodeoffset < 0)
 		debug("Can't find nodeoffset: %d\n", nodeoffset);
-#endif
+
+	if (!size)
+		return nodeoffset;
+
 	len = fdt_pack_reg(blob, tmp, &start, &size, 1);
 	err = fdt_setprop(blob, nodeoffset, "reg", tmp, len);
 	if (err < 0) {

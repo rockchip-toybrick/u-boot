@@ -336,6 +336,8 @@ void drm_rk_selete_output(struct hdmi_edid_data *edid_data,
 	struct base2_screen_info *screen_info2 = NULL;
 	int max_scan = 100;
 	int min_scan = 51;
+	int offset = 0;
+	bool found = false;
 	struct blk_desc *dev_desc;
 	disk_partition_t part_info;
 	char baseparameter_buf[8 * RK_BLK_SIZE] __aligned(ARCH_DMA_MINALIGN);
@@ -354,21 +356,22 @@ void drm_rk_selete_output(struct hdmi_edid_data *edid_data,
 		dev_desc = rockchip_get_bootdev();
 		if (!dev_desc) {
 			printf("%s: Could not find device\n", __func__);
-			return;
+			goto null_basep;
 		}
 
 		ret = part_get_info_by_name(dev_desc, "baseparameter",
 					    &part_info);
 		if (ret < 0) {
 			printf("Could not find baseparameter partition\n");
-			return;
+			goto null_basep;
 		}
 
-		ret = blk_dread(dev_desc, part_info.start, 1,
+read_aux:
+		ret = blk_dread(dev_desc, part_info.start + offset, 1,
 				(void *)baseparameter_buf);
 		if (ret < 0) {
 			printf("read baseparameter failed\n");
-			return;
+			goto null_basep;
 		}
 
 		memcpy(&base_parameter, baseparameter_buf,
@@ -381,9 +384,16 @@ void drm_rk_selete_output(struct hdmi_edid_data *edid_data,
 		for (i = 0; i < screen_size; i++) {
 			if (base_parameter.screen_list[i].type ==
 			    DRM_MODE_CONNECTOR_HDMIA) {
+				found = true;
 				screen_info = &base_parameter.screen_list[i];
 				break;
 			}
+		}
+
+		if (!found && !offset) {
+			printf("hdmi info isn't saved in main block\n");
+			offset += 16;
+			goto read_aux;
 		}
 	} else {
 		scan = &base2_parameter->overscan_info;
@@ -427,7 +437,7 @@ void drm_rk_selete_output(struct hdmi_edid_data *edid_data,
 	else if (scan->bottomscale < max_scan && scan->bottomscale > 0)
 		overscan->bottom_margin = scan->bottomscale;
 
-
+null_basep:
 
 	if (screen_info)
 		printf("base_parameter.mode:%dx%d\n",

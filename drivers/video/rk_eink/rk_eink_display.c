@@ -216,6 +216,7 @@ static int get_addr_by_type(struct udevice *dev, u32 logo_type)
 	case EINK_LOGO_CHARGING_4:
 	case EINK_LOGO_CHARGING_5:
 	case EINK_LOGO_CHARGING_LOWPOWER:
+	case EINK_LOGO_POWEROFF:
 	/*
 	 * The MIRROR_TEMP_BUF is used to save the
 	 * non-mirror image data.
@@ -423,25 +424,25 @@ static int ebc_power_set(struct udevice *dev, int is_on)
 	struct rk_ebc_pwr_ops *pwr_ops = ebc_pwr_get_ops(ebc_pwr_dev);
 
 	if (is_on) {
-		ret = ebc_tcon_ops->enable(ebc_tcon_dev, panel);
-		if (ret) {
-			printf("%s, ebc tcon enabled failed\n", __func__);
-			return -1;
-		}
 		ret = pwr_ops->power_on(ebc_pwr_dev);
 		if (ret) {
 			printf("%s, power on failed\n", __func__);
 			return -1;
 		}
-	} else {
-		ret = pwr_ops->power_down(ebc_pwr_dev);
+		ret = ebc_tcon_ops->enable(ebc_tcon_dev, panel);
 		if (ret) {
-			printf("%s, power_down failed\n", __func__);
+			printf("%s, ebc tcon enabled failed\n", __func__);
 			return -1;
 		}
+	} else {
 		ret = ebc_tcon_ops->disable(ebc_tcon_dev);
 		if (ret) {
 			printf("%s, ebc tcon disable failed\n", __func__);
+			return -1;
+		}
+		ret = pwr_ops->power_down(ebc_pwr_dev);
+		if (ret) {
+			printf("%s, power_down failed\n", __func__);
 			return -1;
 		}
 	}
@@ -582,41 +583,6 @@ static int rockchip_eink_show_logo(int cur_logo_type, int update_mode)
 			printf("Invalid last logo addr, exit!\n");
 			goto out;
 		}
-
-		/* The last logo of charging logo display */
-		if (cur_logo_type == EINK_LOGO_RESET) {
-			struct udevice *ebc_tcon_dev = priv->ebc_tcon_dev;
-			struct rk_ebc_tcon_ops *ebc_tcon_ops;
-
-			logo_addr = get_addr_by_type(dev, EINK_LOGO_RESET);
-			eink_display(dev, last_logo_addr,
-				     logo_addr,
-				     WF_TYPE_GC16, update_mode);
-			last_logo_type = -1;
-			/*
-			 * For normal logo display, waiting for the last frame
-			 * completion before start a new frame, except one
-			 * situation which charging logo display finished,
-			 * because device will rebooting or shutdown after
-			 * charging logo is competed.
-			 *
-			 * We should take care of the power sequence,
-			 * because ebc can't power off if last frame
-			 * data is still sending, so keep the ebc power
-			 * during u-boot phase and shutdown the
-			 * power only if uboot charging is finished.
-			 */
-			ebc_tcon_ops = ebc_tcon_get_ops(ebc_tcon_dev);
-			ebc_tcon_ops->wait_for_last_frame_complete(ebc_tcon_dev);
-			debug("charging logo displaying is complete\n");
-			/*
-			 *shutdown ebc after charging logo display is complete
-			 */
-			ret = ebc_power_set(dev, EBC_PWR_DOWN);
-			if (ret)
-				printf("Eink power down failed\n");
-			goto out;
-		}
 	}
 	ret = read_needed_logo_from_partition(dev, cur_logo_type,
 					      &loaded_logo);
@@ -640,6 +606,37 @@ static int rockchip_eink_show_logo(int cur_logo_type, int update_mode)
 		backlight_enable(priv->backlight);
 
 	last_logo_type = cur_logo_type;
+
+	if (cur_logo_type == EINK_LOGO_POWEROFF) {
+		struct udevice *ebc_tcon_dev = priv->ebc_tcon_dev;
+		struct rk_ebc_tcon_ops *ebc_tcon_ops;
+
+		last_logo_type = -1;
+		/*
+		 * For normal logo display, waiting for the last frame
+		 * completion before start a new frame, except one
+		 * situation which charging logo display finished,
+		 * because device will rebooting or shutdown after
+		 * charging logo is competed.
+		 *
+		 * We should take care of the power sequence,
+		 * because ebc can't power off if last frame
+		 * data is still sending, so keep the ebc power
+		 * during u-boot phase and shutdown the
+		 * power only if uboot charging is finished.
+		 */
+		ebc_tcon_ops = ebc_tcon_get_ops(ebc_tcon_dev);
+		ebc_tcon_ops->wait_for_last_frame_complete(ebc_tcon_dev);
+		debug("charging logo displaying is complete\n");
+		/*
+		 *shutdown ebc after charging logo display is complete
+		 */
+		ret = ebc_power_set(dev, EBC_PWR_DOWN);
+		if (ret)
+			printf("Eink power down failed\n");
+		goto out;
+	}
+
 	/*
 	 * System will boot up to kernel only when the
 	 * logo is uboot logo
@@ -693,7 +690,9 @@ int rockchip_eink_show_charge_logo(int logo_type)
 
 static int rockchip_eink_display_probe(struct udevice *dev)
 {
-	int ret, vcom;
+	int ret, vcom, size, i;
+	const fdt32_t *list;
+	uint32_t phandle;
 	struct rockchip_eink_display_priv *priv = dev_get_priv(dev);
 
 	/* Before relocation we don't need to do anything */
@@ -708,9 +707,23 @@ static int rockchip_eink_display_probe(struct udevice *dev)
 		return ret;
 	}
 
-	ret = uclass_get_device_by_phandle(UCLASS_I2C_GENERIC, dev,
-					   "pmic",
-					   &priv->ebc_pwr_dev);
+	list = dev_read_prop(dev, "pmic", &size);
+	if (!list) {
+		dev_err(dev, "Cannot get pmic prop\n");
+		return -EINVAL;
+	}
+
+	size /= sizeof(*list);
+	for (i = 0; i < size; i++) {
+		phandle = fdt32_to_cpu(*list++);
+		ret = uclass_get_device_by_phandle_id(UCLASS_I2C_GENERIC,
+						      phandle,
+						      &priv->ebc_pwr_dev);
+		if (!ret) {
+			printf("Eink: use pmic %s\n", priv->ebc_pwr_dev->name);
+			break;
+		}
+	}
 	if (ret) {
 		dev_err(dev, "Cannot get pmic: %d\n", ret);
 		return ret;

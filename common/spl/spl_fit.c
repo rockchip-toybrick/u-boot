@@ -267,7 +267,7 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
 
 #ifdef CONFIG_SPL_FIT_IMAGE_POST_PROCESS
 	board_fit_image_post_process(fit, node, (ulong *)&load_addr,
-				     (ulong **)&src, &length);
+				     (ulong **)&src, &length, info);
 #endif
 	puts("OK\n");
 
@@ -542,6 +542,13 @@ static int spl_load_kernel_fit(struct spl_image_info *spl_image,
 
 			if (!spl_get_current_slot(info->dev, "misc", slot_suffix))
 				fdt_bootargs_append_ab((void *)image_info.load_addr, slot_suffix);
+#endif
+
+#ifdef CONFIG_SPL_MTD_SUPPORT
+			struct blk_desc *desc = info->dev;
+
+			if (desc->devnum == BLK_MTD_SPI_NAND)
+				fdt_bootargs_append((void *)image_info.load_addr, mtd_part_parse(desc));
 #endif
 		} else if (!strcmp(images[i], FIT_KERNEL_PROP)) {
 #if CONFIG_IS_ENABLED(OPTEE)
