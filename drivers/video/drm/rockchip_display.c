@@ -36,6 +36,8 @@
 #include <dm/ofnode.h>
 #include <asm/io.h>
 
+#include <fs.h>
+
 #define DRIVER_VERSION	"v1.0.1"
 
 /***********************************************************************
@@ -48,6 +50,11 @@
 
 #define RK_BLK_SIZE 512
 #define BMP_PROCESSED_FLAG 8399
+
+#define LOGO_PATH  "extlinux/logo.bmp"
+#define LOGO_KERNEL_PATH  "extlinux/logo_kernel.bmp"
+#define LOGO_LOAD_ADDR          0x0cc00000
+#define LOGO_KERNEL_LOAD_ADDR   0x0cf00000
 
 DECLARE_GLOBAL_DATA_PTR;
 static LIST_HEAD(rockchip_display_list);
@@ -1200,6 +1207,35 @@ struct rockchip_logo_cache *find_or_alloc_logo_cache(const char *bmp)
 	return logo_cache;
 }
 
+static int boot_linux_read_logo_file(void *buf, const char *name, int offset, int len)
+{
+    unsigned long addr;
+	loff_t bytes;
+	loff_t pos = 0;
+	loff_t len_read;
+	int ret;
+
+    if (fs_set_blk_dev("mmc", "0:3", FS_TYPE_EXT)) {
+        printf("fs_set_blk_dev mmc 0:3 fail\n");
+		return 1;
+    }
+
+    bytes = len;
+    if (!strcmp(name, LOGO_PATH)) {
+        addr = LOGO_LOAD_ADDR;
+    } else {
+        addr = LOGO_KERNEL_LOAD_ADDR;
+    }
+    ret = fs_read(name, addr, pos, bytes, &len_read);
+    if (ret < 0) {
+        printf("fs_read %s to %lx fail\n", LOGO_PATH, addr);
+        return 1;
+    }
+    memcpy(buf, (unsigned char *)addr, bytes);
+  
+    return len_read;
+}
+
 /* Note: used only for rkfb kernel driver */
 static int load_kernel_bmp_logo(struct logo_info *logo, const char *bmp_name)
 {
@@ -1215,19 +1251,31 @@ static int load_kernel_bmp_logo(struct logo_info *logo, const char *bmp_name)
 	if (!header)
 		return -ENOMEM;
 
-	len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
-	if (len != RK_BLK_SIZE) {
-		free(header);
-		return -EINVAL;
-	}
+    //Firstly, read   logo_kernel.bmp from boot_linux.img
+    len = boot_linux_read_logo_file(header, LOGO_KERNEL_PATH, 0, RK_BLK_SIZE);
+    if (len != RK_BLK_SIZE) {
+         printf("boot_linux_read_logo_file %s fail, len: %d\n", bmp_name, len);
+        len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
+        if (len != RK_BLK_SIZE) {
+            printf("rockchip_read_resource_file %s fail, len: %d\n", bmp_name, len);
+            free(header);
+            return -EINVAL;
+        }
+    }
+
 	size = get_unaligned_le32(&header->file_size);
 	dst = (void *)(memory_start + MEMORY_POOL_SIZE / 2);
-	len = rockchip_read_resource_file(dst, bmp_name, 0, size);
-	if (len != size) {
-		printf("failed to load bmp %s\n", bmp_name);
-		free(header);
-		return -ENOENT;
-	}
+
+    len = boot_linux_read_logo_file(dst, LOGO_KERNEL_PATH, 0, size);
+    if (len != size) {
+        printf("boot_linux_read_logo_file %s fail, len: %d\n", bmp_name, len);
+        len = rockchip_read_resource_file(dst, bmp_name, 0, size);
+        if (len != size) {
+            printf("failed to load bmp %s\n", bmp_name);
+            free(header);
+            return -ENOENT;
+        }
+    }
 
 	logo->mem = dst;
 #endif
@@ -1261,11 +1309,17 @@ static int load_bmp_logo(struct logo_info *logo, const char *bmp_name)
 	if (!header)
 		return -ENOMEM;
 
-	len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
-	if (len != RK_BLK_SIZE) {
-		ret = -EINVAL;
-		goto free_header;
-	}
+    //Firstly, read logo.bmp from boot_linux.img
+    len = boot_linux_read_logo_file(header, LOGO_PATH, 0, RK_BLK_SIZE);
+    if (len != RK_BLK_SIZE) {
+        printf("boot_linux_read_logo_file %s fail, len: %d\n", bmp_name, len);
+        len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
+        if (len != RK_BLK_SIZE) {
+            printf("rockchip_read_resource_file %s fail, len: %d\n", bmp_name, len);
+            ret = -EINVAL;
+            goto free_header;
+        }
+    }
 
 	logo->bpp = get_unaligned_le16(&header->bit_count);
 	logo->width = get_unaligned_le32(&header->width);
@@ -1288,12 +1342,17 @@ static int load_bmp_logo(struct logo_info *logo, const char *bmp_name)
 		dst = pdst;
 	}
 
-	len = rockchip_read_resource_file(pdst, bmp_name, 0, size);
-	if (len != size) {
-		printf("failed to load bmp %s\n", bmp_name);
-		ret = -ENOENT;
-		goto free_header;
-	}
+    len = boot_linux_read_logo_file(pdst, LOGO_PATH, 0, size);
+    if (len != size) {
+        printf("boot_linux_read_logo_file %s fail, len: %d\n", bmp_name, len);
+        len = rockchip_read_resource_file(pdst, bmp_name, 0, size);
+        if (len != size) {
+            printf("failed to load bmp %s\n", bmp_name);
+            ret = -ENOENT;
+            goto free_header;
+        }
+
+    }
 
 	if (!can_direct_logo(logo->bpp)) {
 		/*
