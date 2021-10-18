@@ -1310,7 +1310,13 @@ static int load_bmp_logo(struct logo_info *logo, const char *bmp_name)
 		return -ENOMEM;
 
     //Firstly, read logo.bmp from boot_linux.img
-    len = boot_linux_read_logo_file(header, LOGO_PATH, 0, RK_BLK_SIZE);
+    if (!strcmp(bmp_name, "logo.bmp")) {
+        len = boot_linux_read_logo_file(header, LOGO_PATH, 0, RK_BLK_SIZE);
+    } else if (!strcmp(bmp_name, "logo_kernel.bmp")) {
+        len = boot_linux_read_logo_file(header, LOGO_KERNEL_PATH, 0, RK_BLK_SIZE);
+    } else {
+        len = -1;
+    }
     if (len != RK_BLK_SIZE) {
         printf("boot_linux_read_logo_file %s fail, len: %d\n", bmp_name, len);
         len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
@@ -1342,7 +1348,13 @@ static int load_bmp_logo(struct logo_info *logo, const char *bmp_name)
 		dst = pdst;
 	}
 
-    len = boot_linux_read_logo_file(pdst, LOGO_PATH, 0, size);
+    if (!strcmp(bmp_name, "logo.bmp")) {
+        len = boot_linux_read_logo_file(pdst, LOGO_PATH, 0, size);
+    } else if (!strcmp(bmp_name, "logo_kernel.bmp")) {
+        len = boot_linux_read_logo_file(pdst, LOGO_KERNEL_PATH, 0, size);
+    } else {
+        len = -1;
+    }
     if (len != size) {
         printf("boot_linux_read_logo_file %s fail, len: %d\n", bmp_name, len);
         len = rockchip_read_resource_file(pdst, bmp_name, 0, size);
