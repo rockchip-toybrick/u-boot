@@ -55,6 +55,8 @@
 #define LOGO_KERNEL_PATH  "extlinux/logo_kernel.bmp"
 #define LOGO_LOAD_ADDR          0x0cc00000
 #define LOGO_KERNEL_LOAD_ADDR   0x0cf00000
+#define IFNAME                  "mmc"
+
 
 DECLARE_GLOBAL_DATA_PTR;
 static LIST_HEAD(rockchip_display_list);
@@ -1213,10 +1215,37 @@ static int boot_linux_read_logo_file(void *buf, const char *name, int offset, in
 	loff_t bytes;
 	loff_t pos = 0;
 	loff_t len_read;
-	int ret;
+	int ret, p;
+    int err;
+    struct blk_desc *desc;
+    disk_partition_t info;
+    char dev_str[8];
 
-    if (fs_set_blk_dev("mmc", "0:3", FS_TYPE_EXT)) {
-        printf("fs_set_blk_dev mmc 0:3 fail\n");
+    ret = blk_get_device_by_str(IFNAME, "0", &desc);
+	if (ret < 0) {
+        printf("blk_get_device_by_str fail.\n");
+		return 1;
+	}
+
+    for(p = 1; p < MAX_SEARCH_PARTITIONS; p++) {
+        err = part_get_info(desc, p, &info);
+	    if (err) {
+            //printf("part_get_info (%d) fail.\n", p);
+		    continue;
+	    } else {
+            if (!strcmp((const char *)info.name, "boot_linux")) {
+                printf("Boot_linux partition is found!\n");
+                break;
+            }
+        }
+    }
+    if (p == MAX_SEARCH_PARTITIONS) {
+        printf("** No boot_linux partition - %s %s **\n", IFNAME, "0");
+        return 1;
+    }
+    sprintf(dev_str, "0:%d", p);
+    if (fs_set_blk_dev(IFNAME, dev_str, FS_TYPE_EXT)) {
+        printf("fs_set_blk_dev %s %s fail\n", IFNAME, dev_str);
 		return 1;
     }
 
