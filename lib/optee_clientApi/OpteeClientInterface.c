@@ -805,7 +805,7 @@ uint32_t trusty_write_toybrick_SnMacAc(uint8_t *data, uint32_t size)
 		TeecOperation.params[0].value.a = 0;
 
 #ifdef CONFIG_OPTEE_ALWAYS_USE_SECURITY_PARTITION
-	TeecOperation.params[0].value.a = 0;
+	//TeecOperation.params[0].value.a = 0;
 #endif
 
 	TeecResult = TEEC_OpenSession(&TeecContext,
