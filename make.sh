@@ -374,7 +374,7 @@ function sub_commands()
 {
 	# skip "--" parameter, such as "--rollback-index-..."
 	if [[ ${CMD_ARGS} != --* ]]; then
-		CMD=${CMD_ARGS%-*}
+		CMD=${CMD_ARGS%%-*}
 		ARG=${CMD_ARGS#*-}
 	else
 		CMD=${CMD_ARGS}
